@@ -20,8 +20,7 @@
   /* thin white outline while the box has keyboard focus (a hairline on Retina screens) */
   /* Windows: the window is see-through (no blur); the OS draws round corners and the shadow and fades it */
   html.win #app {
-    margin: 0; border: 0; border-radius: 8px;
-    background: rgba(24, 25, 31, .62);
+    margin: 0; border: 0; border-radius: 8px;  /* same panel colour as macOS, from #app above */
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
     opacity: 1; transform: none; transition: border-color .2s, box-shadow .2s;
   }

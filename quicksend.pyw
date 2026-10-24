@@ -56,6 +56,12 @@ if MAC:
             return _keychain().get_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
         except (keyring.errors.KeyringError, RuntimeError):  # locked keychain, access denied, wrong backend
             return None
+
+    def delete_token():
+        try:
+            _keychain().delete_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
+        except keyring.errors.PasswordDeleteError:  # already gone
+            pass
 else:
     TOKEN_FILE = os.path.join(os.environ["APPDATA"], "quickcord", "token.dat")
     user32 = ctypes.windll.user32
@@ -87,6 +93,12 @@ else:
                 return _dpapi(ctypes.windll.crypt32.CryptUnprotectData, f.read()).decode()
             except OSError:  # corrupted, or copied from another PC/account
                 return None
+
+    def delete_token():
+        try:
+            os.remove(TOKEN_FILE)
+        except FileNotFoundError:
+            pass
 
 
 class DoubleTap:
@@ -429,12 +441,30 @@ def main():
 
     logging_in = threading.Lock()  # held while the login window is open, so a restart doesn't lose it
 
+    logged_in = [bool(load_token())]  # cached for the menu, which is rebuilt on the main thread
+
+    def refresh_menu():
+        logged_in[0] = bool(load_token())
+        if MAC:
+            AppHelper.callAfter(icon.update_menu)  # AppKit only on the main thread
+        else:
+            icon.update_menu()
+
     def login_once():
         if logging_in.acquire(blocking=False):
             try:
                 login()
             finally:
                 logging_in.release()
+                refresh_menu()
+
+    def log_in_or_out():
+        if logged_in[0]:
+            # only forgets the token saved here; Discord's own session list still shows it until it expires
+            delete_token()
+            refresh_menu()
+        else:
+            threading.Thread(target=login_once, daemon=True).start()
 
     at_login = [bool(APP_LAUNCHER) and login_item("status")]
 
@@ -456,7 +486,7 @@ def main():
         (64, 64), Image.LANCZOS)
     icon = pystray.Icon("quickcord", img, f"quickcord (double-tap {'Option' if MAC else 'Alt'})", pystray.Menu(
         pystray.MenuItem("Open", lambda: show_soon(), default=True),
-        pystray.MenuItem("Log in", lambda: threading.Thread(target=login_once, daemon=True).start()),
+        pystray.MenuItem(lambda _: "Log out" if logged_in[0] else "Log in", lambda: log_in_or_out()),
         *([pystray.MenuItem("Open at Login", toggle_login_item, checked=lambda _: at_login[0])] if APP_LAUNCHER else []),
         pystray.MenuItem("Quit", quit_app),
     ))

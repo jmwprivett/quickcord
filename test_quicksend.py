@@ -48,6 +48,9 @@ if qs.MAC:
         assert qs.load_token() == "abc.def-ghi"
         qs.save_token("second")  # overwrites rather than adding a second item
         assert qs.load_token() == "second"
+        qs.delete_token()
+        assert qs.load_token() is None
+        qs.delete_token()  # logging out twice is fine
     finally:
         try:
             qs._keychain().delete_password(qs.KEYCHAIN_SERVICE, qs.KEYCHAIN_ACCOUNT)
@@ -62,6 +65,9 @@ else:
     assert qs.load_token() == "abc.def-ghi"
     open(qs.TOKEN_FILE, "wb").write(b"garbage")
     assert qs.load_token() is None
+    qs.delete_token()
+    assert not os.path.exists(qs.TOKEN_FILE)
+    qs.delete_token()  # logging out twice is fine
 assert qs.Api().send("../users/@me", "hi") == {"error": "Pick a conversation"}
 assert qs.Api().send("123", "x" * 2001)["error"]
 print("ok")

@@ -142,7 +142,6 @@ async function send() {
 msg.addEventListener("input", grow);
 msg.addEventListener("keydown", e => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
-  else if (e.key === "Escape") api().hide();
   else if (e.key === "Tab") { e.preventDefault(); openMenu(); }
 });
 to.addEventListener("click", () => menu.hidden ? openMenu() : closeMenu());
@@ -152,8 +151,10 @@ filter.addEventListener("keydown", e => {
   if (e.key === "ArrowDown") { e.preventDefault(); active = (active + 1) % n; render(); }
   else if (e.key === "ArrowUp") { e.preventDefault(); active = (active - 1 + n) % n; render(); }
   else if (e.key === "Enter") { e.preventDefault(); if (n) choose(shown()[active]); }
-  else if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); closeMenu(); }
+  else if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); e.stopPropagation(); closeMenu(); }
 });
+// Esc anywhere in the box closes it (the dropdown's filter handles its own Esc first)
+document.addEventListener("keydown", e => { if (e.key === "Escape") api().hide(); });
 window.addEventListener("blur", () => { if (!sending) api().hide(); });
 
 // called from Python every time the box opens; notice is an optional message to show (e.g. missing permissions)

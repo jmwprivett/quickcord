@@ -7,6 +7,7 @@ import ctypes
 import importlib
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -308,16 +309,83 @@ def activate_mac():
     AppHelper.callAfter(AppKit.NSApplication.sharedApplication().activateIgnoringOtherApps_, True)
 
 
+# quickcord.app's launcher sets this to its own path (see mac/launcher.m); unset when run from a terminal
+APP_LAUNCHER = os.environ.get("QUICKCORD_APP") if MAC else None
+ASKED_LOGIN_ITEM = os.path.expanduser("~/Library/Application Support/quickcord/asked-login-item")
+
 INPUT_MONITORING_HELP = (
-    "quickcord can't see the keyboard, so double-tapping Option won't work. Open System Settings > "
-    "Privacy & Security > Input Monitoring (and Accessibility), turn on the app you ran quickcord from "
-    "(Terminal, or Python, or the quickcord login item), then quit and restart quickcord.")
+    "quickcord can't see the keyboard yet, so double-tapping Option won't work. Open System Settings > "
+    "Privacy & Security > Input Monitoring and turn on "
+    + ("quickcord. It starts working as soon as you do." if APP_LAUNCHER else
+       "the app you ran quickcord from (Terminal, iTerm, your editor), then quit and restart quickcord."))
+INPUT_MONITORING_PANE = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
 
 
 def keyboard_blocked(listener):
     """macOS silently hands a keyboard listener no events until the app is granted Input Monitoring."""
     listener.wait()
     return not listener.is_alive() or not Quartz.CGPreflightListenEventAccess()
+
+
+def restart_when_allowed(busy):
+    """A keyboard tap only works in a process started after the permission was granted, so start over then."""
+    # CGPreflightListenEventAccess keeps its first answer for the life of a process, so ask a fresh one each time
+    check = [sys.executable, "-c", "import sys, Quartz; sys.exit(not Quartz.CGPreflightListenEventAccess())"]
+    while subprocess.run(check).returncode:
+        time.sleep(2)
+    busy.acquire()  # not in the middle of logging in
+    os.execv(sys.executable, [sys.executable, *sys.argv])
+
+
+def login_item(action):
+    """Open at Login, via the app's launcher since macOS ties it to the app bundle: status, enable or disable.
+    Returns whether it's now on."""
+    if action != "status":
+        subprocess.run([APP_LAUNCHER, "--login-item", action], capture_output=True, timeout=10)
+    # whatever enable/disable reported, ask macOS what actually happened
+    r = subprocess.run([APP_LAUNCHER, "--login-item", "status"], capture_output=True, text=True, timeout=10)
+    return r.stdout.strip() == "enabled"
+
+
+def ask(title, text, yes, no):
+    """A native yes/no alert; call from any thread except the main one."""
+    done, answer = threading.Event(), []
+
+    def run():
+        app = AppKit.NSApplication.sharedApplication()
+        app.activateIgnoringOtherApps_(True)
+        alert = AppKit.NSAlert.alloc().init()
+        alert.setMessageText_(title)
+        alert.setInformativeText_(text)
+        alert.addButtonWithTitle_(yes)
+        alert.addButtonWithTitle_(no)
+        if APP_LAUNCHER:
+            alert.setIcon_(app_icon())
+        answer.append(alert.runModal() == AppKit.NSAlertFirstButtonReturn)
+        done.set()
+
+    AppHelper.callAfter(run)
+    done.wait()
+    return answer[0]
+
+
+def app_icon():
+    bundle = os.path.dirname(os.path.dirname(os.path.dirname(APP_LAUNCHER)))  # .app/Contents/MacOS/quickcord
+    return AppKit.NSWorkspace.sharedWorkspace().iconForFile_(bundle)
+
+
+def offer_login_item():
+    """Once, after you're signed in: ask whether quickcord should open at login."""
+    if not APP_LAUNCHER or os.path.exists(ASKED_LOGIN_ITEM) or not load_token():
+        return False
+    os.makedirs(os.path.dirname(ASKED_LOGIN_ITEM), exist_ok=True)
+    open(ASKED_LOGIN_ITEM, "w").close()
+    if login_item("status") or not ask(
+            "Open quickcord when you log in?",
+            "Then double-tapping Option is always ready. You can change this later from quickcord's menu bar icon.",
+            "Open at Login", "Not Now"):
+        return False
+    return login_item("enable")
 
 
 def main():
@@ -333,7 +401,7 @@ def main():
     notice = []  # set when the hotkey can't work, shown every time the box opens
 
     def show():
-        if is_open(window):  # hotkey again while it's up: leave it (and what you've typed) alone
+        if is_open(window):  # already up (e.g. Open from the menu): leave it and what you've typed alone
             return
         screen = webview.screens[0]
         if not MAC:
@@ -359,6 +427,21 @@ def main():
         # off the calling thread: on macOS menu callbacks run on the main thread, where evaluate_js would deadlock
         threading.Thread(target=show, daemon=True).start()
 
+    logging_in = threading.Lock()  # held while the login window is open, so a restart doesn't lose it
+
+    def login_once():
+        if logging_in.acquire(blocking=False):
+            try:
+                login()
+            finally:
+                logging_in.release()
+
+    at_login = [bool(APP_LAUNCHER) and login_item("status")]
+
+    def toggle_login_item(icon):
+        at_login[0] = login_item("disable" if at_login[0] else "enable")
+        icon.update_menu()
+
     def quit_app(icon):
         icon.visible = False
         if MAC:
@@ -373,7 +456,8 @@ def main():
         (64, 64), Image.LANCZOS)
     icon = pystray.Icon("quickcord", img, f"quickcord (double-tap {'Option' if MAC else 'Alt'})", pystray.Menu(
         pystray.MenuItem("Open", lambda: show_soon(), default=True),
-        pystray.MenuItem("Log in", lambda: threading.Thread(target=login, daemon=True).start()),
+        pystray.MenuItem("Log in", lambda: threading.Thread(target=login_once, daemon=True).start()),
+        *([pystray.MenuItem("Open at Login", toggle_login_item, checked=lambda _: at_login[0])] if APP_LAUNCHER else []),
         pystray.MenuItem("Quit", quit_app),
     ))
 
@@ -397,7 +481,8 @@ def main():
         def on(pressed):
             def handler(k):  # must return None: pynput stops the listener if a callback returns False
                 if detector.feed(pressed, k in ALTS, time.monotonic()):
-                    show_soon()
+                    # the hotkey toggles: closing keeps what you've typed for next time, like Esc
+                    close_soon() if is_open(window) else show_soon()
                 # Esc while just hovering the box (it isn't focused, so the page never sees the key)
                 if MAC and pressed and k == keyboard.Key.esc and hovered_unfocused(window):
                     close_soon()
@@ -424,15 +509,21 @@ def main():
         listener.start()
 
         if MAC and keyboard_blocked(listener):
-            # adds the app to the Input Monitoring list, and the first time asks with a link to System Settings
-            Quartz.CGRequestListenEventAccess()
-            notice.append(INPUT_MONITORING_HELP)
-            show()
+            Quartz.CGRequestListenEventAccess()  # adds quickcord to the Input Monitoring list, switched off
+            notice.append(INPUT_MONITORING_HELP)  # for whenever the box is opened from the menu bar meanwhile
+            # an alert rather than the box: it stays put while you go to System Settings
+            if ask("quickcord needs to see the keyboard", INPUT_MONITORING_HELP, "Open System Settings", "Later"):
+                AppKit.NSWorkspace.sharedWorkspace().openURL_(AppKit.NSURL.URLWithString_(INPUT_MONITORING_PANE))
+            if APP_LAUNCHER:
+                restart_when_allowed(logging_in)  # logging in waits for the restarted, working process
         if not MAC:
             icon.run_detached()
 
         if not load_token():
-            login()
+            login_once()
+        if MAC and offer_login_item():
+            at_login[0] = True
+            AppHelper.callAfter(icon.update_menu)
 
     webview.start(started)
 

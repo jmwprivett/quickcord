@@ -10,6 +10,8 @@ import time
 import tkinter as tk
 from ctypes import wintypes
 
+import pystray
+from PIL import Image, ImageDraw
 from pynput import keyboard
 
 TAP_WINDOW = 0.4  # seconds allowed between the two Alt taps
@@ -142,11 +144,22 @@ class Popup:
         detector = DoubleTap()
         on = lambda pressed: lambda k: detector.feed(pressed, k in ALTS, time.monotonic()) and self.events.put("show")
         keyboard.Listener(on_press=on(True), on_release=on(False), daemon=True).start()
+
+        img = Image.new("RGBA", (64, 64))
+        ImageDraw.Draw(img).ellipse((4, 4, 60, 60), fill="#5865f2")
+        self.tray = pystray.Icon("quickcord", img, "quickcord (double-tap Alt)", pystray.Menu(
+            pystray.MenuItem("Open", lambda: self.events.put("show"), default=True),
+            pystray.MenuItem("Quit", lambda: self.events.put("quit")),
+        ))
+        self.tray.run_detached()
         root.after(50, self.poll)
 
     def poll(self):
         while not self.events.empty():
-            self.events.get()
+            if self.events.get() == "quit":
+                self.tray.stop()
+                self.root.destroy()
+                return
             self.show()
         self.root.after(50, self.poll)
 

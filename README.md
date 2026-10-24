@@ -9,9 +9,11 @@ Double-tap **Alt** anywhere on Windows to pop up a small box and send a Discord 
 ## Run
 
 ```
-pip install pynput
+pip install pynput pystray pillow
 pythonw quicksend.pyw
 ```
+
+A blurple dot appears in the system tray while it's running. Right-click it and pick **Quit** to close it.
 
 To start it with Windows, put a shortcut to `quicksend.pyw` in `shell:startup`.
 

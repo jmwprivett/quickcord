@@ -1,26 +1,27 @@
-"""Double-tap Alt -> tiny box -> message goes to Discord, sent as you.
+"""quickcord: double-tap Alt -> small box -> Discord message, sent as you.
 
-Drives the running Discord desktop app (Ctrl+K quick switcher + typing), so no
-token or bot is needed. Discord must be running (tray is fine).
+Talks to Discord's API with your user token (token.txt next to this file).
 """
 import ctypes
+import json
 import os
-import queue
 import time
-import tkinter as tk
-from ctypes import wintypes
+import urllib.error
+import urllib.request
 
 import pystray
+import webview
 from PIL import Image, ImageDraw
 from pynput import keyboard
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+TOKEN_FILE = os.path.join(HERE, "token.txt")
+API = "https://discord.com/api/v9"
 TAP_WINDOW = 0.4  # seconds allowed between the two Alt taps
-LAST_TARGET = os.path.join(os.path.dirname(os.path.abspath(__file__)), "last_target.txt")
+WIDTH, HEIGHT, MAX_HEIGHT = 680, 70, 480
 ALTS = {keyboard.Key.alt, keyboard.Key.alt_l, keyboard.Key.alt_r, keyboard.Key.alt_gr}
 
 user32 = ctypes.windll.user32
-kernel32 = ctypes.windll.kernel32
-kb = keyboard.Controller()
 
 
 class DoubleTap:
@@ -50,158 +51,128 @@ class DoubleTap:
         return False
 
 
-def find_discord():
-    """Main window of Discord.exe (also finds it when hidden in the tray)."""
-    found = []
-
-    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    def cb(hwnd, _):
-        title = ctypes.create_unicode_buffer(512)
-        user32.GetWindowTextW(hwnd, title, 512)
-        if not title.value.endswith("Discord"):
-            return True
-        pid = wintypes.DWORD()
-        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        h = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-        if h:
-            path = ctypes.create_unicode_buffer(1024)
-            size = wintypes.DWORD(1024)
-            kernel32.QueryFullProcessImageNameW(h, 0, path, ctypes.byref(size))
-            kernel32.CloseHandle(h)
-            if path.value.lower().endswith("discord.exe"):
-                found.append(hwnd)
-                return False
-        return True
-
-    user32.EnumWindows(cb, 0)
-    return found[0] if found else None
+class DiscordError(Exception):
+    pass
 
 
-def tap(key):
-    kb.press(key)
-    kb.release(key)
+def discord(method, path, body=None):
+    if not os.path.exists(TOKEN_FILE):
+        raise DiscordError("Put your Discord token in token.txt (see README)")
+    with open(TOKEN_FILE, encoding="utf-8") as f:
+        token = f.read().strip()
+    req = urllib.request.Request(
+        API + path, method=method,
+        data=json.dumps(body).encode() if body is not None else None,
+        headers={"Authorization": token, "Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            raise DiscordError("Discord rejected the token in token.txt")
+        if e.code == 429:
+            raise DiscordError("Discord is rate limiting, try again in a few seconds")
+        raise DiscordError(f"Discord error {e.code}: {e.read().decode(errors='replace')[:200]}")
+    except urllib.error.URLError as e:
+        raise DiscordError(f"Couldn't reach Discord: {e.reason}")
 
 
-def send_to_discord(target, message):
-    hwnd = find_discord()
-    if not hwnd:
-        return "Discord isn't running"
-    was_visible = user32.IsWindowVisible(hwnd) and not user32.IsIconic(hwnd)
-    user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-    user32.SetForegroundWindow(hwnd)
-    time.sleep(0.4)
-    if user32.GetForegroundWindow() != hwnd:
-        return "Couldn't focus Discord"
-    if target:
-        with kb.pressed(keyboard.Key.ctrl):
-            tap("k")
-        time.sleep(0.3)
-        kb.type(target)
-        time.sleep(0.6)  # let the switcher rank results
-        tap(keyboard.Key.enter)
-        time.sleep(0.6)
-    for i, line in enumerate(message.split("\n")):
-        if i:
-            with kb.pressed(keyboard.Key.shift):  # newline without sending
-                tap(keyboard.Key.enter)
-        kb.type(line)
-    tap(keyboard.Key.enter)
-    time.sleep(0.2)
-    if not was_visible:
-        user32.ShowWindow(hwnd, 6)  # SW_MINIMIZE, put it back out of the way
-    return None
+def recent_chats(channels):
+    """DMs and group DMs, newest message first, in the shape the UI wants."""
+    chats = []
+    for c in channels:
+        users = c.get("recipients", [])
+        if c["type"] == 1 and users:
+            u = users[0]
+            name = u.get("global_name") or u["username"]
+            avatar = (f"https://cdn.discordapp.com/avatars/{u['id']}/{u['avatar']}.png?size=64" if u.get("avatar")
+                      else f"https://cdn.discordapp.com/embed/avatars/{(int(u['id']) >> 22) % 6}.png")
+        elif c["type"] == 3:
+            name = c.get("name") or ", ".join(u.get("global_name") or u["username"] for u in users) or "Group"
+            avatar = (f"https://cdn.discordapp.com/channel-icons/{c['id']}/{c['icon']}.png?size=64" if c.get("icon")
+                      else "https://cdn.discordapp.com/embed/avatars/0.png")
+        else:
+            continue
+        chats.append({"id": c["id"], "name": name, "avatar": avatar, "last": int(c.get("last_message_id") or 0)})
+    chats.sort(key=lambda c: c["last"], reverse=True)
+    return chats
 
 
-class Popup:
+class Api:
+    """Called from ui.html via window.pywebview.api.*"""
+
     def __init__(self):
-        self.events = queue.Queue()
-        self.root = root = tk.Tk()
-        root.withdraw()
-        root.overrideredirect(True)
-        root.attributes("-topmost", True)
-        root.configure(bg="#313338", padx=10, pady=10)
+        self._window = None
 
-        font = ("Segoe UI", 13)
-        self.msg = tk.Text(root, width=48, height=1, font=font, bg="#383a40", fg="#dbdee1",
-                           insertbackground="#dbdee1", relief="flat", padx=8, pady=6, wrap="word")
-        self.msg.grid(row=0, column=0, sticky="nsew")
-        tk.Label(root, text="to", font=("Segoe UI", 10), bg="#313338", fg="#949ba4").grid(row=0, column=1, padx=(10, 4))
-        self.to = tk.Entry(root, width=16, font=font, bg="#383a40", fg="#dbdee1",
-                           insertbackground="#dbdee1", relief="flat")
-        self.to.grid(row=0, column=2, sticky="ns", ipady=6)
-        self.status = tk.Label(root, text="", font=("Segoe UI", 9), bg="#313338", fg="#f23f43")
-        self.status.grid(row=1, column=0, columnspan=3, sticky="w")
-        if os.path.exists(LAST_TARGET):
-            with open(LAST_TARGET, encoding="utf-8") as f:
-                self.to.insert(0, f.read().strip())
+    def chats(self):
+        try:
+            return {"chats": recent_chats(discord("GET", "/users/@me/channels"))}
+        except DiscordError as e:
+            return {"error": str(e)}
 
-        for w in (self.msg, self.to):
-            w.bind("<Return>", self.submit)
-            w.bind("<Escape>", lambda e: self.hide())
-        self.msg.bind("<Shift-Return>", lambda e: self.grow())
-        root.bind("<FocusOut>", lambda e: root.after(100, self.hide_if_unfocused))
+    def send(self, channel_id, text):
+        if not text.strip() or len(text) > 2000:
+            return {"error": "Messages must be 1 to 2000 characters"}
+        try:
+            discord("POST", f"/channels/{channel_id}/messages", {"content": text})
+            return {}
+        except DiscordError as e:
+            return {"error": str(e)}
 
+    def resize(self, height):
+        self._window.resize(WIDTH, max(HEIGHT, min(int(height), MAX_HEIGHT)))
+
+    def hide(self):
+        self._window.hide()
+
+
+def force_foreground(hwnd):
+    # Windows only lets the app that made the last input take focus, so make a harmless Alt press ourselves
+    user32.keybd_event(0x12, 0, 1, 0)  # VK_MENU down, extended
+    user32.ShowWindow(hwnd, 5)  # SW_SHOW
+    user32.SetForegroundWindow(hwnd)
+    user32.keybd_event(0x12, 0, 3, 0)  # VK_MENU up
+
+
+def main():
+    api = Api()
+    window = webview.create_window("quickcord", os.path.join(HERE, "ui.html"), js_api=api, width=WIDTH, height=HEIGHT,
+                                   frameless=True, on_top=True, hidden=True, background_color="#313338")
+    api._window = window
+
+    def show():
+        screen = webview.screens[0]
+        window.resize(WIDTH, HEIGHT)
+        window.move((screen.width - WIDTH) // 2, screen.height // 4)
+        window.show()
+        hwnd = user32.FindWindowW(None, "quickcord")
+        if hwnd:
+            corner = ctypes.c_int(2)  # DWMWCP_ROUND, Windows 11 rounded corners
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner), 4)
+            force_foreground(hwnd)
+        window.evaluate_js("onShow()")
+
+    def started():
         detector = DoubleTap()
-        on = lambda pressed: lambda k: detector.feed(pressed, k in ALTS, time.monotonic()) and self.events.put("show")
+
+        def on(pressed):
+            def handler(k):  # must return None: pynput stops the listener if a callback returns False
+                if detector.feed(pressed, k in ALTS, time.monotonic()):
+                    show()
+            return handler
+
         keyboard.Listener(on_press=on(True), on_release=on(False), daemon=True).start()
 
         img = Image.new("RGBA", (64, 64))
         ImageDraw.Draw(img).ellipse((4, 4, 60, 60), fill="#5865f2")
-        self.tray = pystray.Icon("quickcord", img, "quickcord (double-tap Alt)", pystray.Menu(
-            pystray.MenuItem("Open", lambda: self.events.put("show"), default=True),
-            pystray.MenuItem("Quit", lambda: self.events.put("quit")),
-        ))
-        self.tray.run_detached()
-        root.after(50, self.poll)
+        pystray.Icon("quickcord", img, "quickcord (double-tap Alt)", pystray.Menu(
+            pystray.MenuItem("Open", lambda: show(), default=True),
+            pystray.MenuItem("Quit", lambda icon: (icon.stop(), window.destroy())),
+        )).run_detached()
 
-    def poll(self):
-        while not self.events.empty():
-            if self.events.get() == "quit":
-                self.tray.stop()
-                self.root.destroy()
-                return
-            self.show()
-        self.root.after(50, self.poll)
-
-    def grow(self):
-        lines = int(self.msg.index("end-1c").split(".")[0]) + 1
-        self.msg.configure(height=min(lines, 8))
-
-    def show(self):
-        r = self.root
-        self.status.configure(text="")
-        r.deiconify()
-        r.update_idletasks()
-        x = (r.winfo_screenwidth() - r.winfo_width()) // 2
-        r.geometry(f"+{x}+{r.winfo_screenheight() // 4}")
-        r.lift()
-        r.focus_force()
-        self.msg.focus_set()
-
-    def hide(self):
-        self.root.withdraw()
-
-    def hide_if_unfocused(self):
-        if self.root.focus_get() is None:
-            self.hide()
-
-    def submit(self, _):
-        message = self.msg.get("1.0", "end-1c").strip()
-        target = self.to.get().strip()
-        if not message:
-            return "break"
-        self.hide()
-        err = send_to_discord(target, message)
-        if err:
-            self.show()
-            self.status.configure(text=err)
-            return "break"
-        self.msg.delete("1.0", "end")
-        self.msg.configure(height=1)
-        with open(LAST_TARGET, "w", encoding="utf-8") as f:
-            f.write(target)
-        return "break"
+    webview.start(started)
 
 
 if __name__ == "__main__":
-    Popup().root.mainloop()
+    main()

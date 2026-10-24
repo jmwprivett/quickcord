@@ -1,0 +1,169 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  html, body { background: #313338; color: #dbdee1; font: 15px "gg sans", "Segoe UI Variable Text", "Segoe UI", sans-serif; overflow: hidden; user-select: none; }
+  #app { padding: 12px; }
+  .bar { display: flex; gap: 8px; align-items: flex-end; }
+  textarea {
+    flex: 1; resize: none; border: 0; outline: 0; border-radius: 8px; background: #383a40; color: inherit;
+    font: inherit; line-height: 22px; padding: 12px 14px; height: 46px; max-height: 200px; user-select: text;
+  }
+  textarea::placeholder { color: #6d6f78; }
+  textarea:disabled { opacity: .6; }
+  .to {
+    display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 10px 0 8px; max-width: 200px;
+    border: 0; border-radius: 8px; background: #383a40; color: inherit; font: inherit; cursor: pointer; outline: 0;
+  }
+  .to:hover, .to:focus-visible, .to.open { background: #404249; }
+  .to span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .to svg { flex: none; opacity: .7; transition: transform .15s; }
+  .to.open svg { transform: rotate(180deg); }
+  img { width: 26px; height: 26px; border-radius: 50%; flex: none; background: #2b2d31; }
+  .err { color: #f23f43; font-size: 13px; padding: 8px 2px 0; }
+  .menu { margin-top: 8px; background: #2b2d31; border-radius: 8px; padding: 6px; }
+  .menu input {
+    width: 100%; border: 0; outline: 0; border-radius: 6px; background: #1e1f22; color: inherit; font: inherit;
+    padding: 8px 10px; margin-bottom: 4px; user-select: text;
+  }
+  .list { max-height: 290px; overflow-y: auto; }
+  .list::-webkit-scrollbar { width: 8px; }
+  .list::-webkit-scrollbar-thumb { background: #1a1b1e; border-radius: 4px; }
+  .item { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px; cursor: pointer; color: #b5bac1; }
+  .item.active { background: #404249; color: #fff; }
+  .item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .empty { padding: 10px; color: #6d6f78; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="bar">
+    <textarea id="msg" rows="1" placeholder="Message"></textarea>
+    <button class="to" id="to" tabindex="0">
+      <img id="toAvatar" alt=""><span id="toName">Loading…</span>
+      <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+  <div class="err" id="err" hidden></div>
+  <div class="menu" id="menu" hidden>
+    <input id="filter" placeholder="Find a conversation">
+    <div class="list" id="list"></div>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const msg = $("msg"), to = $("to"), menu = $("menu"), filter = $("filter"), list = $("list"), err = $("err");
+let chats = [], selected = null, active = 0, sending = false;
+
+const api = () => window.pywebview.api;
+const fit = () => api().resize(Math.ceil(document.getElementById("app").getBoundingClientRect().height));
+
+function grow() {
+  msg.style.height = "46px";
+  msg.style.height = Math.min(msg.scrollHeight, 200) + "px";
+  fit();
+}
+
+function showError(text) {
+  err.textContent = text || "";
+  err.hidden = !text;
+  fit();
+}
+
+function pick(chat) {
+  selected = chat;
+  $("toName").textContent = chat ? chat.name : "No DMs";
+  $("toAvatar").src = chat ? chat.avatar : "";
+}
+
+function shown() {
+  const q = filter.value.trim().toLowerCase();
+  return chats.filter(c => c.name.toLowerCase().includes(q));
+}
+
+function render() {
+  const items = shown();
+  active = Math.max(0, Math.min(active, items.length - 1));
+  list.innerHTML = items.length ? "" : '<div class="empty">No matches</div>';
+  items.forEach((c, i) => {
+    const el = document.createElement("div");
+    el.className = "item" + (i === active ? " active" : "");
+    el.innerHTML = `<img src="${c.avatar}" alt=""><span></span>`;
+    el.querySelector("span").textContent = c.name;
+    el.onmousedown = e => { e.preventDefault(); choose(c); };
+    list.appendChild(el);
+  });
+  list.querySelector(".active")?.scrollIntoView({ block: "nearest" });
+}
+
+function openMenu() {
+  menu.hidden = false;
+  to.classList.add("open");
+  filter.value = "";
+  active = Math.max(0, chats.indexOf(selected));
+  render();
+  fit();
+  filter.focus();
+}
+
+function closeMenu() {
+  menu.hidden = true;
+  to.classList.remove("open");
+  fit();
+  msg.focus();
+}
+
+function choose(chat) {
+  pick(chat);
+  closeMenu();
+}
+
+async function send() {
+  const text = msg.value.trim();
+  if (!text || !selected || sending) return;
+  sending = msg.disabled = true;
+  const res = await api().send(selected.id, text);
+  sending = msg.disabled = false;
+  if (res.error) {
+    showError(res.error);  // keep the text so nothing is lost
+    msg.focus();
+    return;
+  }
+  msg.value = "";
+  grow();
+  api().hide();
+}
+
+msg.addEventListener("input", grow);
+msg.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+  else if (e.key === "Escape") api().hide();
+  else if (e.key === "Tab") { e.preventDefault(); openMenu(); }
+});
+to.addEventListener("click", () => menu.hidden ? openMenu() : closeMenu());
+filter.addEventListener("input", () => { active = 0; render(); });
+filter.addEventListener("keydown", e => {
+  const n = shown().length;
+  if (e.key === "ArrowDown") { e.preventDefault(); active = (active + 1) % n; render(); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); active = (active - 1 + n) % n; render(); }
+  else if (e.key === "Enter") { e.preventDefault(); if (n) choose(shown()[active]); }
+  else if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); closeMenu(); }
+});
+window.addEventListener("blur", () => { if (!sending) api().hide(); });
+
+// called from Python every time the box opens
+async function onShow() {
+  if (!menu.hidden) closeMenu();
+  showError("");
+  msg.focus();
+  const res = await api().chats();
+  if (res.error) return showError(res.error);
+  chats = res.chats;
+  pick(chats[0] || null);  // most recent conversation
+}
+</script>
+</body>
+</html>

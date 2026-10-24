@@ -20,4 +20,16 @@ assert taps((1, 1, 0), (1, 0, .02), (0, 1, .05), (1, 1, .15), (0, 1, .2))[-1] is
 assert taps((1, 1, 0), (1, 1, .03), (0, 1, .05), (1, 1, .1), (0, 1, .15))[-1] is True
 # triple tap fires once, not twice
 assert taps((1, 1, 0), (0, 1, .05), (1, 1, .1), (0, 1, .15), (1, 1, .2), (0, 1, .25)) == [False, False, False, True, False, False]
+
+# DMs and groups sorted newest first; servers, empty DMs and missing avatars handled
+chats = qs.recent_chats([
+    {"id": "1", "type": 1, "last_message_id": "100", "recipients": [{"id": "9", "username": "old", "avatar": None}]},
+    {"id": "2", "type": 1, "last_message_id": "300", "recipients": [{"id": "8", "username": "u", "global_name": "New", "avatar": "abc"}]},
+    {"id": "3", "type": 3, "last_message_id": "200", "name": None, "icon": None,
+     "recipients": [{"id": "7", "username": "a"}, {"id": "6", "username": "b"}]},
+    {"id": "4", "type": 1, "last_message_id": None, "recipients": [{"id": "5", "username": "never"}]},
+    {"id": "5", "type": 0},
+])
+assert [c["name"] for c in chats] == ["New", "a, b", "old", "never"], chats
+assert chats[0]["avatar"].endswith("/avatars/8/abc.png?size=64")
 print("ok")

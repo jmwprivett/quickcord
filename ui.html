@@ -9,7 +9,7 @@
   #app {
     margin: 16px; padding: 12px; border-radius: 16px;
     background: linear-gradient(160deg, rgba(64, 66, 78, .80), rgba(28, 29, 35, .86));
-    border: 1px solid rgba(255, 255, 255, .10);
+    border: .5px solid rgba(255, 255, 255, .10);
     box-shadow: 0 14px 36px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .10);
     opacity: 0; transform: translateY(-8px) scale(.97);
     transition: opacity .11s ease-in, transform .11s ease-in, border-color .2s, box-shadow .2s;
@@ -18,21 +18,8 @@
     opacity: 1; transform: none;
     transition: opacity .16s ease-out, transform .22s cubic-bezier(.2, .9, .3, 1.15), border-color .2s, box-shadow .2s;
   }
-  /* white glow while the box has keyboard focus, plus a light sheen that sweeps across once */
-  body.focused #app {
-    border-color: rgba(255, 255, 255, .70);
-    box-shadow: 0 14px 36px rgba(0, 0, 0, .45), 0 0 18px rgba(255, 255, 255, .14),
-                inset 0 0 20px rgba(255, 255, 255, .07), inset 0 1px 0 rgba(255, 255, 255, .25);
-  }
-  #app { position: relative; overflow: hidden; }
-  #app::after {
-    content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-    background: linear-gradient(105deg, transparent 40%, rgba(255, 255, 255, .10) 46%, rgba(255, 255, 255, .30) 50%,
-                rgba(255, 255, 255, .10) 54%, transparent 60%);
-    transform: translateX(-100%);
-  }
-  body.focused #app::after { animation: sheen .9s cubic-bezier(.3, .6, .3, 1) .05s; }
-  @keyframes sheen { to { transform: translateX(100%); } }
+  /* thin white outline while the box has keyboard focus (a hairline on Retina screens) */
+  body.focused #app { border: .5px solid rgba(255, 255, 255, .70); }
   /* Windows: the OS draws acrylic glass, round corners and the shadow, and fades the whole window */
   html.win #app {
     margin: 0; border: 0; border-radius: 8px;
@@ -40,7 +27,7 @@
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
     opacity: 1; transform: none; transition: border-color .2s, box-shadow .2s;
   }
-  html.win body.focused #app { box-shadow: inset 0 0 22px rgba(255, 255, 255, .08), inset 0 1px 0 rgba(255, 255, 255, .22); }
+  html.win body.focused #app { border: 0; }  /* Windows draws the outline as its 1px window border */
   .bar { display: flex; gap: 8px; align-items: flex-end; }
   textarea {
     flex: 1; resize: none; border: 0; outline: 0; border-radius: 10px; background: rgba(255, 255, 255, .07); color: inherit;

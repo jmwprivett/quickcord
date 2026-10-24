@@ -219,6 +219,18 @@ def login():
             return
 
 
+def light_theme():
+    """True when the tray / menu bar is light, so the icon should be black."""
+    if MAC:
+        return AppKit.NSUserDefaults.standardUserDefaults().stringForKey_("AppleInterfaceStyle") != "Dark"
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as k:
+            return winreg.QueryValueEx(k, "SystemUsesLightTheme")[0] == 1  # taskbar theme, separate from apps
+    except OSError:
+        return False  # older Windows: dark taskbar
+
+
 def force_foreground(hwnd):
     # Windows only lets the app that made the last input take focus, so make a harmless Alt press ourselves
     user32.keybd_event(0x12, 0, 1, 0)  # VK_MENU down, extended
@@ -281,8 +293,9 @@ def main():
             icon.stop()
             window.destroy()
 
-    img = Image.open(os.path.join(HERE, "icon.png")).resize((64, 64), Image.LANCZOS)
-    icon =pystray.Icon("quickcord", img, f"quickcord (double-tap {'Option' if MAC else 'Alt'})", pystray.Menu(
+    # shortcut: theme is read once at startup, so switching light/dark needs a restart to swap the icon
+    img = Image.open(os.path.join(HERE, "light-icon.png" if light_theme() else "icon.png")).resize((64, 64), Image.LANCZOS)
+    icon = pystray.Icon("quickcord", img, f"quickcord (double-tap {'Option' if MAC else 'Alt'})", pystray.Menu(
         pystray.MenuItem("Open", lambda: show_soon(), default=True),
         pystray.MenuItem("Log in", lambda: threading.Thread(target=login, daemon=True).start()),
         pystray.MenuItem("Quit", quit_app),

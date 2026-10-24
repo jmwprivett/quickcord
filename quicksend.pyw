@@ -508,23 +508,46 @@ def main():
         def close_soon():  # off the key hook's thread: blocking there would stall every keypress
             threading.Thread(target=lambda: window.evaluate_js("closeBox()"), daemon=True).start()
 
+        def toggle():  # the hotkey toggles: closing keeps what you've typed for next time, like Esc
+            close_soon() if is_open(window) else show_soon()
+
         def on(pressed):
             def handler(k):  # must return None: pynput stops the listener if a callback returns False
                 if detector.feed(pressed, k in ALTS, time.monotonic()):
-                    # the hotkey toggles: closing keeps what you've typed for next time, like Esc
-                    close_soon() if is_open(window) else show_soon()
+                    toggle()
                 # Esc while just hovering the box (it isn't focused, so the page never sees the key)
                 if MAC and pressed and k == keyboard.Key.esc and hovered_unfocused(window):
                     close_soon()
             return handler
 
         swallowed = []  # an Esc press we swallowed, so its release gets swallowed too
+        lone_alt = [False]  # Alt is down and no other key has been pressed since
 
         def win32_filter(msg, data):
-            # Windows: same hover Esc, but swallowed so it doesn't also hit the app underneath
+            down = msg in (0x100, 0x104)  # WM_KEYDOWN, WM_SYSKEYDOWN
+            if data.vkCode in (0x12, 0xA4, 0xA5):  # Alt, left Alt, right Alt
+                if data.flags & 0x10:  # injected by us (focus trick, menu mask): never one of your taps
+                    return False
+                if down:
+                    lone_alt[0] = True
+                elif lone_alt[0] and is_open(window) and user32.GetForegroundWindow() == user32.FindWindowW(None, "quickcord"):
+                    # a lone Alt release would put the focused box in menu mode, which blurs and closes it.
+                    # Swallow it and replay it behind an unassigned key, so it's an Alt+key combo instead.
+                    lone_alt[0] = False
+                    if detector.feed(False, True, time.monotonic()):
+                        toggle()
+                    user32.keybd_event(0xE8, 0, 0, 0)
+                    user32.keybd_event(0xE8, 0, 2, 0)
+                    # the real key-up, so Alt isn't left held down (right Alt is an extended key)
+                    user32.keybd_event(data.vkCode, 0, 2 | (1 if data.vkCode == 0xA5 else 0), 0)
+                    listener.suppress_event()
+                return True
+            if down:
+                lone_alt[0] = False
+            # same hover Esc as macOS, but swallowed so it doesn't also hit the app underneath
             if data.vkCode != 0x1B:  # VK_ESCAPE
                 return True
-            if msg in (0x100, 0x104):  # WM_KEYDOWN, WM_SYSKEYDOWN
+            if down:
                 if hovered_unfocused(window):
                     swallowed.append(True)
                     close_soon()

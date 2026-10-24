@@ -24,7 +24,7 @@ The first time you run it, a Discord login window opens. Log in like normal; qui
 pythonw quicksend.pyw
 ```
 
-A blurple dot appears in the system tray while it's running. Right-click it and pick **Quit** to close it. To start it with Windows, put a shortcut to `quicksend.pyw` in `shell:startup`.
+A white Discord logo appears in the system tray while it's running. Right-click it and pick **Quit** to close it. To start it with Windows, put a shortcut to `quicksend.pyw` in `shell:startup`.
 
 ## macOS
 
@@ -37,7 +37,7 @@ python3 -m venv .venv
 
 (pywebview pulls in the pyobjc packages quickcord uses for the window, Keychain and menu bar.)
 
-The first time you run it, a Discord login window opens. Log in like normal; quickcord saves your token in your login **Keychain** (item "quickcord"), never in a file, and closes the window. If you ever get logged out, click the blurple dot in the menu bar and pick **Log in**.
+The first time you run it, a Discord login window opens. Log in like normal; quickcord saves your token in your login **Keychain** (item "quickcord"), never in a file, and closes the window. If you ever get logged out, click the Discord logo in the menu bar and pick **Log in**.
 
 ### Permissions
 
@@ -54,7 +54,7 @@ Then quit and restart quickcord. If the permission is missing, quickcord says so
 .venv/bin/python quicksend.pyw
 ```
 
-There's no Dock icon. A blurple dot appears in the menu bar while it's running; click it for **Open**, **Log in** and **Quit**.
+There's no Dock icon. A white Discord logo appears in the menu bar while it's running; click it for **Open**, **Log in** and **Quit**.
 
 ### Start at login
 
@@ -72,3 +72,5 @@ python test_quicksend.py
 ```
 
 On macOS the token test round-trips a throwaway Keychain item and deletes it afterwards.
+
+Tray icon: [Discord icon by Icons8](https://icons8.com).

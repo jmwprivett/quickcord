@@ -15,7 +15,7 @@ import urllib.request
 
 import pystray
 import webview
-from PIL import Image, ImageDraw
+from PIL import Image
 from pynput import keyboard
 
 MAC = sys.platform == "darwin"
@@ -281,9 +281,8 @@ def main():
             icon.stop()
             window.destroy()
 
-    img = Image.new("RGBA", (64, 64))
-    ImageDraw.Draw(img).ellipse((4, 4, 60, 60), fill="#5865f2")
-    icon = pystray.Icon("quickcord", img, f"quickcord (double-tap {'Option' if MAC else 'Alt'})", pystray.Menu(
+    img = Image.open(os.path.join(HERE, "icon.png")).resize((64, 64), Image.LANCZOS)
+    icon =pystray.Icon("quickcord", img, f"quickcord (double-tap {'Option' if MAC else 'Alt'})", pystray.Menu(
         pystray.MenuItem("Open", lambda: show_soon(), default=True),
         pystray.MenuItem("Log in", lambda: threading.Thread(target=login, daemon=True).start()),
         pystray.MenuItem("Quit", quit_app),

@@ -6,8 +6,6 @@ Double-tap **Alt** (Windows) or **Option** (macOS) anywhere to pop up a small bo
 - **Enter** sends, **Shift+Enter** adds a new line, **Tab** opens the dropdown (type to filter, arrows + Enter to pick), **Esc** or the same double-tap closes it.
 - Messages go out as you, through Discord's API, using your account token.
 
-> Automating a user account is against Discord's Terms of Service and can get the account banned. Use at your own risk.
-
 ## Windows
 
 ### Setup

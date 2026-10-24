@@ -14,7 +14,7 @@ Double-tap **Alt** anywhere on Windows to pop up a small box and send a Discord 
 pip install pynput pystray pillow pywebview
 ```
 
-Put your Discord token in `token.txt` next to `quicksend.pyw` (it's gitignored, never share it). To find it: open discord.com in a browser, press F12, go to the Network tab, click any request to `discord.com/api`, and copy the `Authorization` request header.
+The first time you run it, a Discord login window opens. Log in like normal; quickcord saves your token to `token.txt` (gitignored, never share it) and closes the window. If you ever get logged out, right-click the tray icon and pick **Log in**.
 
 ## Run
 

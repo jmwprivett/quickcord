@@ -1,10 +1,11 @@
 """quickcord: double-tap Alt -> small box -> Discord message, sent as you.
 
-Talks to Discord's API with your user token (token.txt next to this file).
+Talks to Discord's API as you. The first run opens Discord's login page and saves the token to token.txt.
 """
 import ctypes
 import json
 import os
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -57,7 +58,7 @@ class DiscordError(Exception):
 
 def discord(method, path, body=None):
     if not os.path.exists(TOKEN_FILE):
-        raise DiscordError("Put your Discord token in token.txt (see README)")
+        raise DiscordError("Not logged in: right-click the tray icon and pick Log in")
     with open(TOKEN_FILE, encoding="utf-8") as f:
         token = f.read().strip()
     req = urllib.request.Request(
@@ -70,7 +71,7 @@ def discord(method, path, body=None):
             return json.load(r)
     except urllib.error.HTTPError as e:
         if e.code == 401:
-            raise DiscordError("Discord rejected the token in token.txt")
+            raise DiscordError("Logged out of Discord: right-click the tray icon and pick Log in")
         if e.code == 429:
             raise DiscordError("Discord is rate limiting, try again in a few seconds")
         raise DiscordError(f"Discord error {e.code}: {e.read().decode(errors='replace')[:200]}")
@@ -127,6 +128,31 @@ class Api:
         self._window.hide()
 
 
+# Discord hides window.localStorage on its pages, but a fresh iframe still has it
+READ_TOKEN_JS = """(() => { try {
+  const f = document.body.appendChild(document.createElement('iframe'));
+  const t = f.contentWindow.localStorage.getItem('token'); f.remove(); return t;
+} catch (e) { return null } })()"""
+
+
+def login():
+    """Opens Discord's own login page and saves the token once you're signed in."""
+    win = webview.create_window("Log in to Discord - quickcord", "https://discord.com/login", width=1000, height=760)
+    closed = []
+    win.events.closed += lambda: closed.append(True)
+    while not closed:
+        time.sleep(1)
+        try:
+            raw = win.evaluate_js(READ_TOKEN_JS)
+        except Exception:  # page still loading or mid-navigation
+            continue
+        if raw:
+            with open(TOKEN_FILE, "w", encoding="utf-8") as f:
+                f.write(json.loads(raw))
+            win.destroy()
+            return
+
+
 def force_foreground(hwnd):
     # Windows only lets the app that made the last input take focus, so make a harmless Alt press ourselves
     user32.keybd_event(0x12, 0, 1, 0)  # VK_MENU down, extended
@@ -168,8 +194,12 @@ def main():
         ImageDraw.Draw(img).ellipse((4, 4, 60, 60), fill="#5865f2")
         pystray.Icon("quickcord", img, "quickcord (double-tap Alt)", pystray.Menu(
             pystray.MenuItem("Open", lambda: show(), default=True),
+            pystray.MenuItem("Log in", lambda: threading.Thread(target=login, daemon=True).start()),
             pystray.MenuItem("Quit", lambda icon: (icon.stop(), window.destroy())),
         )).run_detached()
+
+        if not os.path.exists(TOKEN_FILE):
+            login()
 
     webview.start(started)
 

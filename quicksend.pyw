@@ -24,7 +24,6 @@ MAC = sys.platform == "darwin"
 HERE = os.path.dirname(os.path.abspath(__file__))
 API = "https://discord.com/api/v9"
 TAP_WINDOW = 0.4  # seconds allowed between the two Alt taps
-WIN_OPACITY = 0.83  # Windows can't show the page's own see-through without blurring, so the whole window is see-through
 # on macOS the window is transparent and ui.html keeps a 16px margin around its panel for the shadow;
 # on Windows the panel fills the window and the OS draws the glass, corners and shadow
 MARGIN = 16 if MAC else 0
@@ -100,6 +99,29 @@ else:
             os.remove(TOKEN_FILE)
         except FileNotFoundError:
             pass
+
+    # Windows can't show the page's own see-through without blurring, so the whole window is see-through
+    WIN_OPACITY = 0.86
+
+    RUN_KEY, RUN_VALUE = r"Software\Microsoft\Windows\CurrentVersion\Run", "quickcord"
+
+    def login_item(action):
+        """Open at Login via your account's Run key: status, enable or disable. Returns whether it's now on."""
+        import winreg
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+            if action == "enable":
+                pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+                winreg.SetValueEx(key, RUN_VALUE, 0, winreg.REG_SZ, f'"{pythonw}" "{os.path.abspath(__file__)}"')
+            elif action == "disable":
+                try:
+                    winreg.DeleteValue(key, RUN_VALUE)
+                except FileNotFoundError:
+                    pass
+            try:
+                winreg.QueryValueEx(key, RUN_VALUE)
+                return True
+            except FileNotFoundError:
+                return False
 
 
 class DoubleTap:
@@ -357,14 +379,15 @@ def restart_when_allowed(busy):
     os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
-def login_item(action):
-    """Open at Login, via the app's launcher since macOS ties it to the app bundle: status, enable or disable.
-    Returns whether it's now on."""
-    if action != "status":
-        subprocess.run([APP_LAUNCHER, "--login-item", action], capture_output=True, timeout=10)
-    # whatever enable/disable reported, ask macOS what actually happened
-    r = subprocess.run([APP_LAUNCHER, "--login-item", "status"], capture_output=True, text=True, timeout=10)
-    return r.stdout.strip() == "enabled"
+if MAC:
+    def login_item(action):
+        """Open at Login, via the app's launcher since macOS ties it to the app bundle: status, enable or disable.
+        Returns whether it's now on."""
+        if action != "status":
+            subprocess.run([APP_LAUNCHER, "--login-item", action], capture_output=True, timeout=10)
+        # whatever enable/disable reported, ask macOS what actually happened
+        r = subprocess.run([APP_LAUNCHER, "--login-item", "status"], capture_output=True, text=True, timeout=10)
+        return r.stdout.strip() == "enabled"
 
 
 def ask(title, text, yes, no):
@@ -475,7 +498,8 @@ def main():
         else:
             threading.Thread(target=login_once, daemon=True).start()
 
-    at_login = [bool(APP_LAUNCHER) and login_item("status")]
+    can_open_at_login = bool(APP_LAUNCHER) or not MAC  # macOS needs quickcord.app for it
+    at_login = [can_open_at_login and login_item("status")]
 
     def toggle_login_item(icon):
         at_login[0] = login_item("disable" if at_login[0] else "enable")
@@ -496,7 +520,7 @@ def main():
     icon = pystray.Icon("quickcord", img, f"quickcord (double-tap {'Option' if MAC else 'Alt'})", pystray.Menu(
         pystray.MenuItem("Open", lambda: show_soon(), default=True),
         pystray.MenuItem(lambda _: "Log out" if logged_in[0] else "Log in", lambda: log_in_or_out()),
-        *([pystray.MenuItem("Open at Login", toggle_login_item, checked=lambda _: at_login[0])] if APP_LAUNCHER else []),
+        *([pystray.MenuItem("Open at Login", toggle_login_item, checked=lambda _: at_login[0])] if can_open_at_login else []),
         pystray.MenuItem("Quit", quit_app),
     ))
 

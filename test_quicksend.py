@@ -68,6 +68,16 @@ else:
     qs.delete_token()
     assert not os.path.exists(qs.TOKEN_FILE)
     qs.delete_token()  # logging out twice is fine
+
+    # Open at Login, under a throwaway Run value so the real "quickcord" entry is never touched
+    qs.RUN_VALUE = "quickcord-test-" + uuid.uuid4().hex
+    try:
+        assert qs.login_item("status") is False
+        assert qs.login_item("enable") is True
+        assert qs.login_item("status") is True
+    finally:
+        assert qs.login_item("disable") is False
+    assert qs.login_item("disable") is False  # turning it off twice is fine
 assert qs.Api().send("../users/@me", "hi") == {"error": "Pick a conversation"}
 assert qs.Api().send("123", "x" * 2001)["error"]
 print("ok")

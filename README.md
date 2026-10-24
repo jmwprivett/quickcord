@@ -24,7 +24,7 @@ The first time you run it, a Discord login window opens. Log in like normal; qui
 pythonw quicksend.pyw
 ```
 
-A white Discord logo appears in the system tray while it's running. Right-click it and pick **Quit** to close it. To start it with Windows, put a shortcut to `quicksend.pyw` in `shell:startup`.
+A white Discord logo appears in the system tray while it's running. Right-click it for **Open**, **Log in**/**Log out**, **Open at Login** (start quickcord when you sign in to Windows) and **Quit**.
 
 ## macOS
 

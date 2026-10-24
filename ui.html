@@ -9,7 +9,6 @@
   #app {
     margin: 16px; padding: 12px; border-radius: 16px;
     background: linear-gradient(160deg, rgba(64, 66, 78, .80), rgba(28, 29, 35, .86));
-    border: .5px solid rgba(255, 255, 255, .10);
     box-shadow: 0 14px 36px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .10);
     opacity: 0; transform: translateY(-8px) scale(.97);
     transition: opacity .11s ease-in, transform .11s ease-in, border-color .2s, box-shadow .2s;
@@ -19,7 +18,6 @@
     transition: opacity .16s ease-out, transform .22s cubic-bezier(.2, .9, .3, 1.15), border-color .2s, box-shadow .2s;
   }
   /* thin white outline while the box has keyboard focus (a hairline on Retina screens) */
-  body.focused #app { border: .5px solid rgba(255, 255, 255, .70); }
   /* Windows: the OS draws acrylic glass, round corners and the shadow, and fades the whole window */
   html.win #app {
     margin: 0; border: 0; border-radius: 8px;
@@ -27,7 +25,6 @@
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
     opacity: 1; transform: none; transition: border-color .2s, box-shadow .2s;
   }
-  html.win body.focused #app { border: 0; }  /* Windows draws the outline as its 1px window border */
   .bar { display: flex; gap: 8px; align-items: flex-end; }
   textarea {
     flex: 1; resize: none; border: 0; outline: 0; border-radius: 10px; background: rgba(255, 255, 255, .07); color: inherit;
@@ -95,14 +92,6 @@ function closeBox() {
   app.classList.remove("shown");
   hideTimer = setTimeout(() => { hideTimer = null; api().hide(); }, WIN ? 0 : 120);
 }
-
-function setFocused() {
-  const focused = document.hasFocus();
-  document.body.classList.toggle("focused", focused);
-  if (WIN) api().set_active(focused);  // Windows draws the highlight as the window border
-}
-window.addEventListener("focus", setFocused);
-document.addEventListener("focusin", setFocused);
 
 function grow() {
   msg.style.height = "46px";
@@ -200,7 +189,6 @@ filter.addEventListener("keydown", e => {
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeBox(); });
 // bringing the window forward can blur it for a moment, so only close if focus is really gone
 window.addEventListener("blur", () => {
-  setFocused();
   setTimeout(() => { if (!document.hasFocus() && !sending) closeBox(); }, 150);
 });
 
@@ -211,7 +199,6 @@ async function onShow(notice) {
   app.classList.remove("shown");
   void app.offsetWidth;  // restart the pop-in from its starting pose
   app.classList.add("shown");
-  setFocused();
   if (!menu.hidden) closeMenu();
   showError(notice);
   msg.focus();

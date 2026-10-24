@@ -190,13 +190,6 @@ class Api:
     def resize(self, height):
         self._window.resize(WIDTH, max(HEIGHT, min(int(height), MAX_HEIGHT)))
 
-    def set_active(self, active):
-        """Soft white window border while the box has focus (Windows; ui.html draws it on macOS)."""
-        hwnd = None if MAC else user32.FindWindowW(None, "quickcord")
-        if hwnd:
-            color = ctypes.c_uint(0x00F0EAE8 if active else 0xFFFFFFFF)  # #E8EAF0 as 0x00BBGGRR, or system default
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(color), 4)  # DWMWA_BORDER_COLOR
-
     def hide(self):
         if not MAC:
             fade(self._window, 1, 0)  # on macOS ui.html already faded the panel out
@@ -271,8 +264,9 @@ def glass(window, hwnd):
 
     dwm = ctypes.windll.dwmapi
     dwm.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(Margins(-1, -1, -1, -1)))  # glass under the whole window
-    for attr, value in ((20, 1), (33, 2), (38, 3)):  # dark mode, round corners, acrylic backdrop
-        v = ctypes.c_int(value)
+    # dark mode, round corners, no window border (DWMWA_COLOR_NONE), acrylic backdrop
+    for attr, value in ((20, 1), (33, 2), (34, 0xFFFFFFFE), (38, 3)):
+        v = ctypes.c_uint(value)
         dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(v), 4)
 
 

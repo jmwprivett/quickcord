@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <style>
   * { box-sizing: border-box; margin: 0; }
-  html, body { background: #313338; color: #dbdee1; font: 15px "gg sans", "Segoe UI Variable Text", "Segoe UI", sans-serif; overflow: hidden; user-select: none; }
+  html, body { background: #313338; color: #dbdee1; font: 15px "gg sans", "Segoe UI Variable Text", "Segoe UI", -apple-system, sans-serif; overflow: hidden; user-select: none; }
   #app { padding: 12px; }
   .bar { display: flex; gap: 8px; align-items: flex-end; }
   textarea {
@@ -156,13 +156,13 @@ filter.addEventListener("keydown", e => {
 });
 window.addEventListener("blur", () => { if (!sending) api().hide(); });
 
-// called from Python every time the box opens
-async function onShow() {
+// called from Python every time the box opens; notice is an optional message to show (e.g. missing permissions)
+async function onShow(notice) {
   if (!menu.hidden) closeMenu();
-  showError("");
+  showError(notice);
   msg.focus();
   const res = await api().chats();
-  if (res.error) return showError(res.error);
+  if (res.error) return showError(notice || res.error);
   chats = res.chats;
   pick(chats[0] || null);  // most recent conversation
 }

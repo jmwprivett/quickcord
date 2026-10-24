@@ -1,6 +1,9 @@
+import importlib.machinery
 import importlib.util
 
-spec = importlib.util.spec_from_file_location("qs", "quicksend.pyw")
+# .pyw is only a known source suffix on Windows, so name the loader explicitly
+spec = importlib.util.spec_from_file_location("qs", "quicksend.pyw",
+                                              loader=importlib.machinery.SourceFileLoader("qs", "quicksend.pyw"))
 qs = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(qs)
 
@@ -33,15 +36,32 @@ chats = qs.recent_chats([
 assert [c["name"] for c in chats] == ["New", "a, b", "old", "never"], chats
 assert chats[0]["avatar"].endswith("/avatars/8/abc.png?size=64")
 
-# token encryption round-trips, file isn't plaintext, and bad input is rejected before hitting the API
-import os, tempfile
-qs.TOKEN_FILE = os.path.join(tempfile.mkdtemp(), "token.dat")
-assert qs.load_token() is None
-qs.save_token("abc.def-ghi")
-assert b"abc" not in open(qs.TOKEN_FILE, "rb").read()
-assert qs.load_token() == "abc.def-ghi"
-open(qs.TOKEN_FILE, "wb").write(b"garbage")
-assert qs.load_token() is None
+# token storage round-trips without plaintext on disk, and bad input is rejected before hitting the API
+import os, tempfile, uuid
+if qs.MAC:
+    # throwaway Keychain item, so the real "quickcord" token is never touched
+    import keyring.errors
+    qs.KEYCHAIN_SERVICE = "quickcord-test-" + uuid.uuid4().hex
+    try:
+        assert qs.load_token() is None
+        qs.save_token("abc.def-ghi")
+        assert qs.load_token() == "abc.def-ghi"
+        qs.save_token("second")  # overwrites rather than adding a second item
+        assert qs.load_token() == "second"
+    finally:
+        try:
+            qs._keychain().delete_password(qs.KEYCHAIN_SERVICE, qs.KEYCHAIN_ACCOUNT)
+        except keyring.errors.PasswordDeleteError:
+            pass
+    assert qs.load_token() is None
+else:
+    qs.TOKEN_FILE = os.path.join(tempfile.mkdtemp(), "token.dat")
+    assert qs.load_token() is None
+    qs.save_token("abc.def-ghi")
+    assert b"abc" not in open(qs.TOKEN_FILE, "rb").read()
+    assert qs.load_token() == "abc.def-ghi"
+    open(qs.TOKEN_FILE, "wb").write(b"garbage")
+    assert qs.load_token() is None
 assert qs.Api().send("../users/@me", "hi") == {"error": "Pick a conversation"}
 assert qs.Api().send("123", "x" * 2001)["error"]
 print("ok")

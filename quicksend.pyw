@@ -1,62 +1,89 @@
-"""quickcord: double-tap Alt -> small box -> Discord message, sent as you.
+"""quickcord: double-tap Alt (Option on macOS) -> small box -> Discord message, sent as you.
 
-Talks to Discord's API as you. The first run opens Discord's login page and saves the token,
-encrypted to your Windows account, in %APPDATA%\\quickcord.
+Talks to Discord's API as you. The first run opens Discord's login page and saves the token:
+on Windows encrypted to your account in %APPDATA%\\quickcord, on macOS in the login Keychain.
 """
 import ctypes
+import importlib
 import json
 import os
+import sys
 import threading
 import time
 import urllib.error
 import urllib.request
-from ctypes import wintypes
 
 import pystray
 import webview
 from PIL import Image, ImageDraw
 from pynput import keyboard
 
+MAC = sys.platform == "darwin"
 HERE = os.path.dirname(os.path.abspath(__file__))
-TOKEN_FILE = os.path.join(os.environ["APPDATA"], "quickcord", "token.dat")
 API = "https://discord.com/api/v9"
 TAP_WINDOW = 0.4  # seconds allowed between the two Alt taps
 WIDTH, HEIGHT, MAX_HEIGHT = 680, 70, 480
 ALTS = {keyboard.Key.alt, keyboard.Key.alt_l, keyboard.Key.alt_r, keyboard.Key.alt_gr}
+TRAY = "click the menu bar icon" if MAC else "right-click the tray icon"
 
-user32 = ctypes.windll.user32
+if MAC:
+    import AppKit
+    import keyring
+    import keyring.backends.macOS
+    import keyring.errors
+    import Quartz
+    from PyObjCTools import AppHelper
 
+    KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT = "quickcord", "token"
 
-class _Blob(ctypes.Structure):
-    _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+    def _keychain():
+        # keyring falls back to other backends (some write plain files), so insist on the real Keychain
+        backend = keyring.get_keyring()
+        if not isinstance(backend, keyring.backends.macOS.Keyring):
+            raise RuntimeError(f"Expected the macOS Keychain, got keyring backend {type(backend).__name__}")
+        return backend
 
+    def save_token(token):
+        _keychain().set_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, token)
 
-def _dpapi(fn, data):
-    """Windows DPAPI: only your Windows account on this PC can decrypt."""
-    buf = ctypes.create_string_buffer(data, len(data))
-    out = _Blob()
-    if not fn(ctypes.byref(_Blob(len(data), buf)), None, None, None, None, 0, ctypes.byref(out)):
-        raise ctypes.WinError()
-    try:
-        return ctypes.string_at(out.pbData, out.cbData)
-    finally:
-        ctypes.windll.kernel32.LocalFree(ctypes.cast(out.pbData, ctypes.c_void_p))
-
-
-def save_token(token):
-    os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
-    with open(TOKEN_FILE, "wb") as f:
-        f.write(_dpapi(ctypes.windll.crypt32.CryptProtectData, token.encode()))
-
-
-def load_token():
-    if not os.path.exists(TOKEN_FILE):
-        return None
-    with open(TOKEN_FILE, "rb") as f:
+    def load_token():
         try:
-            return _dpapi(ctypes.windll.crypt32.CryptUnprotectData, f.read()).decode()
-        except OSError:  # corrupted, or copied from another PC/account
+            return _keychain().get_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
+        except (keyring.errors.KeyringError, RuntimeError):  # locked keychain, access denied, wrong backend
             return None
+else:
+    from ctypes import wintypes
+
+    TOKEN_FILE = os.path.join(os.environ["APPDATA"], "quickcord", "token.dat")
+    user32 = ctypes.windll.user32
+
+    class _Blob(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+    def _dpapi(fn, data):
+        """Windows DPAPI: only your Windows account on this PC can decrypt."""
+        buf = ctypes.create_string_buffer(data, len(data))
+        out = _Blob()
+        if not fn(ctypes.byref(_Blob(len(data), buf)), None, None, None, None, 0, ctypes.byref(out)):
+            raise ctypes.WinError()
+        try:
+            return ctypes.string_at(out.pbData, out.cbData)
+        finally:
+            ctypes.windll.kernel32.LocalFree(ctypes.cast(out.pbData, ctypes.c_void_p))
+
+    def save_token(token):
+        os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
+        with open(TOKEN_FILE, "wb") as f:
+            f.write(_dpapi(ctypes.windll.crypt32.CryptProtectData, token.encode()))
+
+    def load_token():
+        if not os.path.exists(TOKEN_FILE):
+            return None
+        with open(TOKEN_FILE, "rb") as f:
+            try:
+                return _dpapi(ctypes.windll.crypt32.CryptUnprotectData, f.read()).decode()
+            except OSError:  # corrupted, or copied from another PC/account
+                return None
 
 
 class DoubleTap:
@@ -93,7 +120,7 @@ class DiscordError(Exception):
 def discord(method, path, body=None):
     token = load_token()
     if not token:
-        raise DiscordError("Not logged in: right-click the tray icon and pick Log in")
+        raise DiscordError(f"Not logged in: {TRAY} and pick Log in")
     req = urllib.request.Request(
         API + path, method=method,
         data=json.dumps(body).encode() if body is not None else None,
@@ -104,7 +131,7 @@ def discord(method, path, body=None):
             return json.load(r)
     except urllib.error.HTTPError as e:
         if e.code == 401:
-            raise DiscordError("Logged out of Discord: right-click the tray icon and pick Log in")
+            raise DiscordError(f"Logged out of Discord: {TRAY} and pick Log in")
         if e.code == 429:
             raise DiscordError("Discord is rate limiting, try again in a few seconds")
         raise DiscordError(f"Discord error {e.code}: {e.read().decode(errors='replace')[:200]}")
@@ -173,6 +200,8 @@ READ_TOKEN_JS = """(() => { try {
 def login():
     """Opens Discord's own login page and saves the token once you're signed in."""
     win = webview.create_window("Log in to Discord - quickcord", "https://discord.com/login", width=1000, height=760)
+    if MAC:  # a menu bar app isn't active by default, so pull the login window to the front
+        win.events.shown += activate_mac
     closed = []
     win.events.closed += lambda: closed.append(True)
     while not closed:
@@ -198,6 +227,23 @@ def force_foreground(hwnd):
     user32.keybd_event(0x12, 0, 3, 0)  # VK_MENU up
 
 
+def activate_mac():
+    # AppKit calls must run on the main thread, which pywebview's run loop owns
+    AppHelper.callAfter(AppKit.NSApplication.sharedApplication().activateIgnoringOtherApps_, True)
+
+
+INPUT_MONITORING_HELP = (
+    "quickcord can't see the keyboard, so double-tapping Option won't work. Open System Settings > "
+    "Privacy & Security > Input Monitoring (and Accessibility), turn on the app you ran quickcord from "
+    "(Terminal, or Python, or the quickcord login item), then quit and restart quickcord.")
+
+
+def keyboard_blocked(listener):
+    """macOS silently hands a keyboard listener no events until the app is granted Input Monitoring."""
+    listener.wait()
+    return not listener.is_alive() or not Quartz.CGPreflightListenEventAccess()
+
+
 def main():
     api = Api()
     # inline html, not a file path: a path makes pywebview serve this whole folder on localhost
@@ -206,18 +252,52 @@ def main():
     window = webview.create_window("quickcord", html=html, js_api=api, width=WIDTH, height=HEIGHT,
                                    frameless=True, on_top=True, hidden=True, background_color="#313338")
     api._window = window
+    notice = []  # set when the hotkey can't work, shown every time the box opens
 
     def show():
         screen = webview.screens[0]
         window.resize(WIDTH, HEIGHT)
         window.move((screen.width - WIDTH) // 2, screen.height // 4)
         window.show()
-        hwnd = user32.FindWindowW(None, "quickcord")
-        if hwnd:
-            corner = ctypes.c_int(2)  # DWMWCP_ROUND, Windows 11 rounded corners
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner), 4)
-            force_foreground(hwnd)
-        window.evaluate_js("onShow()")
+        if MAC:
+            activate_mac()  # pywebview's show() makes the window key; this makes the app frontmost
+        else:
+            hwnd = user32.FindWindowW(None, "quickcord")
+            if hwnd:
+                corner = ctypes.c_int(2)  # DWMWCP_ROUND, Windows 11 rounded corners
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner), 4)
+                force_foreground(hwnd)
+        window.evaluate_js(f"onShow({json.dumps(notice[0] if notice else None)})")
+
+    def show_soon():
+        # off the calling thread: on macOS menu callbacks run on the main thread, where evaluate_js would deadlock
+        threading.Thread(target=show, daemon=True).start()
+
+    def quit_app(icon):
+        icon.visible = False
+        if MAC:
+            AppKit.NSApplication.sharedApplication().terminate_(None)
+        else:
+            icon.stop()
+            window.destroy()
+
+    img = Image.new("RGBA", (64, 64))
+    ImageDraw.Draw(img).ellipse((4, 4, 60, 60), fill="#5865f2")
+    icon = pystray.Icon("quickcord", img, f"quickcord (double-tap {'Option' if MAC else 'Alt'})", pystray.Menu(
+        pystray.MenuItem("Open", lambda: show_soon(), default=True),
+        pystray.MenuItem("Log in", lambda: threading.Thread(target=login, daemon=True).start()),
+        pystray.MenuItem("Quit", quit_app),
+    ))
+
+    if MAC:
+        # a menu bar app: no Dock icon or app menu. pywebview's Cocoa backend sets the regular policy when it's
+        # imported, which start() would otherwise do after us, so import it first.
+        importlib.import_module("webview.platforms.cocoa")
+        AppKit.NSApplication.sharedApplication().setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+        # pywebview's start() owns the main thread and its run loop. pystray's macOS backend only needs that
+        # run loop, so set the status item up here on the main thread instead of in a background setup thread.
+        icon.run_detached(lambda _: None)
+        icon.visible = True
 
     def started():
         detector = DoubleTap()
@@ -225,18 +305,19 @@ def main():
         def on(pressed):
             def handler(k):  # must return None: pynput stops the listener if a callback returns False
                 if detector.feed(pressed, k in ALTS, time.monotonic()):
-                    show()
+                    show_soon()
             return handler
 
-        keyboard.Listener(on_press=on(True), on_release=on(False), daemon=True).start()
+        listener = keyboard.Listener(on_press=on(True), on_release=on(False), daemon=True)
+        listener.start()
 
-        img = Image.new("RGBA", (64, 64))
-        ImageDraw.Draw(img).ellipse((4, 4, 60, 60), fill="#5865f2")
-        pystray.Icon("quickcord", img, "quickcord (double-tap Alt)", pystray.Menu(
-            pystray.MenuItem("Open", lambda: show(), default=True),
-            pystray.MenuItem("Log in", lambda: threading.Thread(target=login, daemon=True).start()),
-            pystray.MenuItem("Quit", lambda icon: (icon.stop(), window.destroy())),
-        )).run_detached()
+        if MAC and keyboard_blocked(listener):
+            # adds the app to the Input Monitoring list, and the first time asks with a link to System Settings
+            Quartz.CGRequestListenEventAccess()
+            notice.append(INPUT_MONITORING_HELP)
+            show()
+        if not MAC:
+            icon.run_detached()
 
         if not load_token():
             login()

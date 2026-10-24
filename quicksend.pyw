@@ -276,21 +276,21 @@ class _Margins(ctypes.Structure):
 
 
 def glass(window, hwnd):
-    """Windows 11 acrylic behind the page, with rounded corners and no window border."""
+    """See-through window (the page draws the dark tint), with rounded corners and no window border."""
     from System.Drawing import Color
     on_ui_thread(window, lambda: setattr(window.native.browser.webview, "DefaultBackgroundColor", Color.Transparent))
 
     dwm = ctypes.windll.dwmapi
-    dwm.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(_Margins(-1, -1, -1, -1)))  # glass under the whole window
-    # dark mode, round corners, no window border (DWMWA_COLOR_NONE), acrylic backdrop
-    for attr, value in ((20, 1), (33, 2), (34, 0xFFFFFFFE), (38, 3)):
+    dwm.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(_Margins(-1, -1, -1, -1)))  # see-through under the whole window
+    # dark mode, round corners, no window border (DWMWA_COLOR_NONE), no blur backdrop (crisper on dark backgrounds)
+    for attr, value in ((20, 1), (33, 2), (34, 0xFFFFFFFE), (38, 1)):
         v = ctypes.c_uint(value)
         dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(v), 4)
 
 
 def keep_glass_lit(hwnd):
-    # the acrylic turns flat gray while the window isn't active (e.g. it opened without getting focus);
-    # WM_NCACTIVATE(TRUE) makes Windows draw it as active anyway
+    # Windows draws inactive windows differently (e.g. when the box opened without getting focus);
+    # WM_NCACTIVATE(TRUE) makes it draw the box as active anyway
     user32.SendMessageW(hwnd, 0x86, 1, 0)
 
 

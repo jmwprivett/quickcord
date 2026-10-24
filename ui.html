@@ -18,10 +18,10 @@
     transition: opacity .16s ease-out, transform .22s cubic-bezier(.2, .9, .3, 1.15), border-color .2s, box-shadow .2s;
   }
   /* thin white outline while the box has keyboard focus (a hairline on Retina screens) */
-  /* Windows: the OS draws acrylic glass, round corners and the shadow, and fades the whole window */
+  /* Windows: the window is see-through (no blur); the OS draws round corners and the shadow and fades it */
   html.win #app {
     margin: 0; border: 0; border-radius: 8px;
-    background: linear-gradient(160deg, rgba(70, 72, 86, .38), rgba(20, 21, 26, .30));
+    background: rgba(24, 25, 31, .62);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
     opacity: 1; transform: none; transition: border-color .2s, box-shadow .2s;
   }

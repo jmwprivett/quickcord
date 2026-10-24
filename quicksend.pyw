@@ -24,6 +24,7 @@ MAC = sys.platform == "darwin"
 HERE = os.path.dirname(os.path.abspath(__file__))
 API = "https://discord.com/api/v9"
 TAP_WINDOW = 0.4  # seconds allowed between the two Alt taps
+WIN_OPACITY = 0.83  # Windows can't show the page's own see-through without blurring, so the whole window is see-through
 # on macOS the window is transparent and ui.html keeps a 16px margin around its panel for the shadow;
 # on Windows the panel fills the window and the OS draws the glass, corners and shadow
 MARGIN = 16 if MAC else 0
@@ -203,7 +204,7 @@ class Api:
 
     def hide(self):
         if not MAC:
-            fade(self._window, 1, 0)  # on macOS ui.html already faded the panel out
+            fade(self._window, WIN_OPACITY, 0)  # on macOS ui.html already faded the panel out
         self._window.hide()
 
 
@@ -276,7 +277,7 @@ class _Margins(ctypes.Structure):
 
 
 def glass(window, hwnd):
-    """See-through window (the page draws the dark tint), with rounded corners and no window border."""
+    """Rounded corners and no window border; the see-through comes from WIN_OPACITY."""
     from System.Drawing import Color
     on_ui_thread(window, lambda: setattr(window.native.browser.webview, "DefaultBackgroundColor", Color.Transparent))
 
@@ -441,7 +442,7 @@ def main():
                 on_ui_thread(window, lambda: window.native.browser.webview.Focus())
         window.evaluate_js(f"onShow({json.dumps(notice[0] if notice else None)})")
         if not MAC:
-            fade(window, 0, 1)
+            fade(window, 0, WIN_OPACITY)
 
     def show_soon():
         # off the calling thread: on macOS menu callbacks run on the main thread, where evaluate_js would deadlock

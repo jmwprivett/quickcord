@@ -89,10 +89,12 @@ function render() {
   active = Math.max(0, Math.min(active, items.length - 1));
   list.innerHTML = items.length ? "" : '<div class="empty">No matches</div>';
   items.forEach((c, i) => {
-    const el = document.createElement("div");
+    // names and avatars come from Discord, so never build HTML strings from them
+    const el = document.createElement("div"), img = document.createElement("img"), name = document.createElement("span");
     el.className = "item" + (i === active ? " active" : "");
-    el.innerHTML = `<img src="${c.avatar}" alt=""><span></span>`;
-    el.querySelector("span").textContent = c.name;
+    img.src = c.avatar;
+    name.textContent = c.name;
+    el.append(img, name);
     el.onmousedown = e => { e.preventDefault(); choose(c); };
     list.appendChild(el);
   });

@@ -1,6 +1,7 @@
 """quickcord: double-tap Alt -> small box -> Discord message, sent as you.
 
-Talks to Discord's API as you. The first run opens Discord's login page and saves the token to token.txt.
+Talks to Discord's API as you. The first run opens Discord's login page and saves the token,
+encrypted to your Windows account, in %APPDATA%\\quickcord.
 """
 import ctypes
 import json
@@ -9,6 +10,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from ctypes import wintypes
 
 import pystray
 import webview
@@ -16,13 +18,45 @@ from PIL import Image, ImageDraw
 from pynput import keyboard
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TOKEN_FILE = os.path.join(HERE, "token.txt")
+TOKEN_FILE = os.path.join(os.environ["APPDATA"], "quickcord", "token.dat")
 API = "https://discord.com/api/v9"
 TAP_WINDOW = 0.4  # seconds allowed between the two Alt taps
 WIDTH, HEIGHT, MAX_HEIGHT = 680, 70, 480
 ALTS = {keyboard.Key.alt, keyboard.Key.alt_l, keyboard.Key.alt_r, keyboard.Key.alt_gr}
 
 user32 = ctypes.windll.user32
+
+
+class _Blob(ctypes.Structure):
+    _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+
+def _dpapi(fn, data):
+    """Windows DPAPI: only your Windows account on this PC can decrypt."""
+    buf = ctypes.create_string_buffer(data, len(data))
+    out = _Blob()
+    if not fn(ctypes.byref(_Blob(len(data), buf)), None, None, None, None, 0, ctypes.byref(out)):
+        raise ctypes.WinError()
+    try:
+        return ctypes.string_at(out.pbData, out.cbData)
+    finally:
+        ctypes.windll.kernel32.LocalFree(ctypes.cast(out.pbData, ctypes.c_void_p))
+
+
+def save_token(token):
+    os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
+    with open(TOKEN_FILE, "wb") as f:
+        f.write(_dpapi(ctypes.windll.crypt32.CryptProtectData, token.encode()))
+
+
+def load_token():
+    if not os.path.exists(TOKEN_FILE):
+        return None
+    with open(TOKEN_FILE, "rb") as f:
+        try:
+            return _dpapi(ctypes.windll.crypt32.CryptUnprotectData, f.read()).decode()
+        except OSError:  # corrupted, or copied from another PC/account
+            return None
 
 
 class DoubleTap:
@@ -57,10 +91,9 @@ class DiscordError(Exception):
 
 
 def discord(method, path, body=None):
-    if not os.path.exists(TOKEN_FILE):
+    token = load_token()
+    if not token:
         raise DiscordError("Not logged in: right-click the tray icon and pick Log in")
-    with open(TOKEN_FILE, encoding="utf-8") as f:
-        token = f.read().strip()
     req = urllib.request.Request(
         API + path, method=method,
         data=json.dumps(body).encode() if body is not None else None,
@@ -113,7 +146,9 @@ class Api:
             return {"error": str(e)}
 
     def send(self, channel_id, text):
-        if not text.strip() or len(text) > 2000:
+        if not (isinstance(channel_id, str) and channel_id.isdigit()):  # it goes into the URL path
+            return {"error": "Pick a conversation"}
+        if not isinstance(text, str) or not text.strip() or len(text) > 2000:
             return {"error": "Messages must be 1 to 2000 characters"}
         try:
             discord("POST", f"/channels/{channel_id}/messages", {"content": text})
@@ -143,12 +178,14 @@ def login():
     while not closed:
         time.sleep(1)
         try:
+            # only trust a token read from discord.com itself, not a page it navigated to
+            if not (win.get_current_url() or "").startswith("https://discord.com/"):
+                continue
             raw = win.evaluate_js(READ_TOKEN_JS)
         except Exception:  # page still loading or mid-navigation
             continue
         if raw:
-            with open(TOKEN_FILE, "w", encoding="utf-8") as f:
-                f.write(json.loads(raw))
+            save_token(json.loads(raw))
             win.destroy()
             return
 
@@ -163,7 +200,10 @@ def force_foreground(hwnd):
 
 def main():
     api = Api()
-    window = webview.create_window("quickcord", os.path.join(HERE, "ui.html"), js_api=api, width=WIDTH, height=HEIGHT,
+    # inline html, not a file path: a path makes pywebview serve this whole folder on localhost
+    with open(os.path.join(HERE, "ui.html"), encoding="utf-8") as f:
+        html = f.read()
+    window = webview.create_window("quickcord", html=html, js_api=api, width=WIDTH, height=HEIGHT,
                                    frameless=True, on_top=True, hidden=True, background_color="#313338")
     api._window = window
 
@@ -198,7 +238,7 @@ def main():
             pystray.MenuItem("Quit", lambda icon: (icon.stop(), window.destroy())),
         )).run_detached()
 
-        if not os.path.exists(TOKEN_FILE):
+        if not load_token():
             login()
 
     webview.start(started)

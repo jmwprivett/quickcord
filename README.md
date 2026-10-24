@@ -14,7 +14,7 @@ Double-tap **Alt** anywhere on Windows to pop up a small box and send a Discord 
 pip install pynput pystray pillow pywebview
 ```
 
-The first time you run it, a Discord login window opens. Log in like normal; quickcord saves your token to `token.txt` (gitignored, never share it) and closes the window. If you ever get logged out, right-click the tray icon and pick **Log in**.
+The first time you run it, a Discord login window opens. Log in like normal; quickcord saves your token to `%APPDATA%\quickcord\token.dat`, encrypted so only your Windows account on this PC can read it, and closes the window. If you ever get logged out, right-click the tray icon and pick **Log in**.
 
 ## Run
 

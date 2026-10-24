@@ -32,4 +32,16 @@ chats = qs.recent_chats([
 ])
 assert [c["name"] for c in chats] == ["New", "a, b", "old", "never"], chats
 assert chats[0]["avatar"].endswith("/avatars/8/abc.png?size=64")
+
+# token encryption round-trips, file isn't plaintext, and bad input is rejected before hitting the API
+import os, tempfile
+qs.TOKEN_FILE = os.path.join(tempfile.mkdtemp(), "token.dat")
+assert qs.load_token() is None
+qs.save_token("abc.def-ghi")
+assert b"abc" not in open(qs.TOKEN_FILE, "rb").read()
+assert qs.load_token() == "abc.def-ghi"
+open(qs.TOKEN_FILE, "wb").write(b"garbage")
+assert qs.load_token() is None
+assert qs.Api().send("../users/@me", "hi") == {"error": "Pick a conversation"}
+assert qs.Api().send("123", "x" * 2001)["error"]
 print("ok")

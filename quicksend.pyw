@@ -191,10 +191,10 @@ class Api:
         self._window.resize(WIDTH, max(HEIGHT, min(int(height), MAX_HEIGHT)))
 
     def set_active(self, active):
-        """Blurple window border while the box has focus (Windows; ui.html draws it on macOS)."""
+        """Soft white window border while the box has focus (Windows; ui.html draws it on macOS)."""
         hwnd = None if MAC else user32.FindWindowW(None, "quickcord")
         if hwnd:
-            color = ctypes.c_uint(0x00F26558 if active else 0xFFFFFFFF)  # #5865F2 as 0x00BBGGRR, or system default
+            color = ctypes.c_uint(0x00F0EAE8 if active else 0xFFFFFFFF)  # #E8EAF0 as 0x00BBGGRR, or system default
             ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(color), 4)  # DWMWA_BORDER_COLOR
 
     def hide(self):

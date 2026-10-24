@@ -271,20 +271,27 @@ def on_ui_thread(window, fn):
     window.native.Invoke(Action(fn))
 
 
+class _Margins(ctypes.Structure):
+    _fields_ = [(side, ctypes.c_int) for side in ("left", "right", "top", "bottom")]
+
+
 def glass(window, hwnd):
-    """Windows 11 acrylic behind the page, with rounded corners and the dark tint."""
+    """Windows 11 acrylic behind the page, with rounded corners and no window border."""
     from System.Drawing import Color
     on_ui_thread(window, lambda: setattr(window.native.browser.webview, "DefaultBackgroundColor", Color.Transparent))
 
-    class Margins(ctypes.Structure):
-        _fields_ = [(side, ctypes.c_int) for side in ("left", "right", "top", "bottom")]
-
     dwm = ctypes.windll.dwmapi
-    dwm.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(Margins(-1, -1, -1, -1)))  # glass under the whole window
+    dwm.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(_Margins(-1, -1, -1, -1)))  # glass under the whole window
     # dark mode, round corners, no window border (DWMWA_COLOR_NONE), acrylic backdrop
     for attr, value in ((20, 1), (33, 2), (34, 0xFFFFFFFE), (38, 3)):
         v = ctypes.c_uint(value)
         dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(v), 4)
+
+
+def keep_glass_lit(hwnd):
+    # the acrylic turns flat gray while the window isn't active (e.g. it opened without getting focus);
+    # WM_NCACTIVATE(TRUE) makes Windows draw it as active anyway
+    user32.SendMessageW(hwnd, 0x86, 1, 0)
 
 
 def fade(window, start, end, steps=8):
@@ -429,6 +436,7 @@ def main():
                 glass(window, hwnd)
                 if user32.GetForegroundWindow() != hwnd:
                     force_foreground(hwnd)
+                keep_glass_lit(hwnd)
                 # pywebview only focuses the page on the very first show; typing needs it every time
                 on_ui_thread(window, lambda: window.native.browser.webview.Focus())
         window.evaluate_js(f"onShow({json.dumps(notice[0] if notice else None)})")

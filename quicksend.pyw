@@ -557,10 +557,10 @@ def main():
         lone_alt = [False]  # Alt is down and no other key has been pressed since
 
         def win32_filter(msg, data):
+            if data.flags & 0x10:  # injected (our focus trick and menu mask): not you typing, so not a tap
+                return False  # nor a key between taps, which would cancel the double-tap
             down = msg in (0x100, 0x104)  # WM_KEYDOWN, WM_SYSKEYDOWN
             if data.vkCode in (0x12, 0xA4, 0xA5):  # Alt, left Alt, right Alt
-                if data.flags & 0x10:  # injected by us (focus trick, menu mask): never one of your taps
-                    return False
                 if down:
                     lone_alt[0] = True
                 elif lone_alt[0] and is_open(window) and user32.GetForegroundWindow() == user32.FindWindowW(None, "quickcord"):

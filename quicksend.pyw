@@ -56,8 +56,6 @@ if MAC:
         except (keyring.errors.KeyringError, RuntimeError):  # locked keychain, access denied, wrong backend
             return None
 else:
-    from ctypes import wintypes
-
     TOKEN_FILE = os.path.join(os.environ["APPDATA"], "quickcord", "token.dat")
     user32 = ctypes.windll.user32
 
@@ -226,15 +224,21 @@ def login():
 
 
 def light_theme():
-    """True when the tray / menu bar is light, so the icon should be black."""
-    if MAC:
-        return AppKit.NSUserDefaults.standardUserDefaults().stringForKey_("AppleInterfaceStyle") != "Dark"
+    """True when the Windows taskbar is light, so the tray icon should be black."""
     import winreg
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as k:
             return winreg.QueryValueEx(k, "SystemUsesLightTheme")[0] == 1  # taskbar theme, separate from apps
     except OSError:
         return False  # older Windows: dark taskbar
+
+
+def menu_bar_image():
+    """The black logo as a template image: macOS tints it for light/dark and wallpaper-tinted menu bars, live."""
+    image = AppKit.NSImage.alloc().initWithContentsOfFile_(os.path.join(HERE, "light-icon.png"))
+    image.setSize_((18, 18))  # points; the 512px original stays as the bitmap, so it's sharp on Retina
+    image.setTemplate_(True)
+    return image
 
 
 def force_foreground(hwnd):
@@ -363,8 +367,10 @@ def main():
             icon.stop()
             window.destroy()
 
-    # shortcut: theme is read once at startup, so switching light/dark needs a restart to swap the icon
-    img = Image.open(os.path.join(HERE, "light-icon.png" if light_theme() else "icon.png")).resize((64, 64), Image.LANCZOS)
+    # shortcut: theme is read once at startup, so switching light/dark needs a restart to swap the icon.
+    # macOS doesn't need it: the black icon becomes a template image below, which the menu bar tints itself.
+    img = Image.open(os.path.join(HERE, "light-icon.png" if MAC or light_theme() else "icon.png")).resize(
+        (64, 64), Image.LANCZOS)
     icon = pystray.Icon("quickcord", img, f"quickcord (double-tap {'Option' if MAC else 'Alt'})", pystray.Menu(
         pystray.MenuItem("Open", lambda: show_soon(), default=True),
         pystray.MenuItem("Log in", lambda: threading.Thread(target=login, daemon=True).start()),
@@ -380,6 +386,7 @@ def main():
         # run loop, so set the status item up here on the main thread instead of in a background setup thread.
         icon.run_detached(lambda _: None)
         icon.visible = True
+        icon._status_item.button().setImage_(menu_bar_image())  # pystray has no option for template images
 
     def started():
         detector = DoubleTap()

@@ -54,7 +54,7 @@ Then quit and restart quickcord. If the permission is missing, quickcord says so
 .venv/bin/python quicksend.pyw
 ```
 
-There's no Dock icon. A white Discord logo appears in the menu bar while it's running; click it for **Open**, **Log in** and **Quit**.
+There's no Dock icon. A Discord logo appears in the menu bar while it's running (macOS tints it to match light, dark or wallpaper-coloured menu bars); click it for **Open**, **Log in** and **Quit**.
 
 ### Start at login
 

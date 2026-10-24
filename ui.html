@@ -4,37 +4,65 @@
 <meta charset="utf-8">
 <style>
   * { box-sizing: border-box; margin: 0; }
-  html, body { background: #313338; color: #dbdee1; font: 15px "gg sans", "Segoe UI Variable Text", "Segoe UI", -apple-system, sans-serif; overflow: hidden; user-select: none; }
-  #app { padding: 12px; }
+  html, body { background: transparent; color: #e6e8ec; font: 15px "gg sans", "Segoe UI Variable Text", "Segoe UI", -apple-system, sans-serif; overflow: hidden; user-select: none; }
+  /* the window is transparent; #app is the visible panel, with margin left around it for the shadow */
+  #app {
+    margin: 16px; padding: 12px; border-radius: 16px;
+    background: linear-gradient(160deg, rgba(64, 66, 78, .80), rgba(28, 29, 35, .86));
+    border: 1px solid rgba(255, 255, 255, .10);
+    box-shadow: 0 14px 36px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .10);
+    opacity: 0; transform: translateY(-8px) scale(.97);
+    transition: opacity .11s ease-in, transform .11s ease-in, border-color .2s, box-shadow .2s;
+  }
+  #app.shown {
+    opacity: 1; transform: none;
+    transition: opacity .16s ease-out, transform .22s cubic-bezier(.2, .9, .3, 1.15), border-color .2s, box-shadow .2s;
+  }
+  /* blurple outline while the box has keyboard focus */
+  body.focused #app {
+    border-color: rgba(88, 101, 242, .85);
+    box-shadow: 0 14px 36px rgba(0, 0, 0, .45), 0 0 0 3px rgba(88, 101, 242, .22), inset 0 1px 0 rgba(255, 255, 255, .10);
+  }
+  /* Windows: the OS draws acrylic glass, round corners and the shadow, and fades the whole window */
+  html.win #app {
+    margin: 0; border: 0; border-radius: 8px;
+    background: linear-gradient(160deg, rgba(70, 72, 86, .38), rgba(20, 21, 26, .30));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
+    opacity: 1; transform: none; transition: border-color .2s, box-shadow .2s;
+  }
+  html.win body.focused #app { box-shadow: inset 0 0 18px rgba(88, 101, 242, .20), inset 0 1px 0 rgba(255, 255, 255, .08); }
   .bar { display: flex; gap: 8px; align-items: flex-end; }
   textarea {
-    flex: 1; resize: none; border: 0; outline: 0; border-radius: 8px; background: #383a40; color: inherit;
+    flex: 1; resize: none; border: 0; outline: 0; border-radius: 10px; background: rgba(255, 255, 255, .07); color: inherit;
     font: inherit; line-height: 22px; padding: 12px 14px; height: 46px; max-height: 200px; user-select: text;
   }
-  textarea::placeholder { color: #6d6f78; }
+  textarea::placeholder { color: rgba(230, 232, 236, .45); }
   textarea:disabled { opacity: .6; }
   .to {
     display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 10px 0 8px; max-width: 200px;
-    border: 0; border-radius: 8px; background: #383a40; color: inherit; font: inherit; cursor: pointer; outline: 0;
+    border: 0; border-radius: 10px; background: rgba(255, 255, 255, .07); color: inherit; font: inherit; cursor: pointer; outline: 0;
+    transition: background .12s;
   }
-  .to:hover, .to:focus-visible, .to.open { background: #404249; }
+  .to:hover, .to:focus-visible, .to.open { background: rgba(255, 255, 255, .13); }
   .to span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .to svg { flex: none; opacity: .7; transition: transform .15s; }
   .to.open svg { transform: rotate(180deg); }
-  img { width: 26px; height: 26px; border-radius: 50%; flex: none; background: #2b2d31; }
-  .err { color: #f23f43; font-size: 13px; padding: 8px 2px 0; }
-  .menu { margin-top: 8px; background: #2b2d31; border-radius: 8px; padding: 6px; }
+  img { width: 26px; height: 26px; border-radius: 50%; flex: none; background: rgba(0, 0, 0, .25); }
+  .err { color: #ff6b6e; font-size: 13px; padding: 8px 2px 0; }
+  .menu { margin-top: 8px; background: rgba(0, 0, 0, .22); border-radius: 10px; padding: 6px; animation: drop .14s ease-out; }
+  @keyframes drop { from { opacity: 0; transform: translateY(-4px); } }
   .menu input {
-    width: 100%; border: 0; outline: 0; border-radius: 6px; background: #1e1f22; color: inherit; font: inherit;
+    width: 100%; border: 0; outline: 0; border-radius: 7px; background: rgba(255, 255, 255, .07); color: inherit; font: inherit;
     padding: 8px 10px; margin-bottom: 4px; user-select: text;
   }
+  .menu input::placeholder { color: rgba(230, 232, 236, .45); }
   .list { max-height: 290px; overflow-y: auto; }
   .list::-webkit-scrollbar { width: 8px; }
-  .list::-webkit-scrollbar-thumb { background: #1a1b1e; border-radius: 4px; }
-  .item { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px; cursor: pointer; color: #b5bac1; }
-  .item.active { background: #404249; color: #fff; }
+  .list::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .12); border-radius: 4px; }
+  .item { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 7px; cursor: pointer; color: rgba(230, 232, 236, .72); }
+  .item.active { background: rgba(255, 255, 255, .11); color: #fff; }
   .item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .empty { padding: 10px; color: #6d6f78; }
+  .empty { padding: 10px; color: rgba(230, 232, 236, .45); }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -56,10 +84,28 @@
 <script>
 const $ = id => document.getElementById(id);
 const msg = $("msg"), to = $("to"), menu = $("menu"), filter = $("filter"), list = $("list"), err = $("err");
-let chats = [], selected = null, active = 0, sending = false;
+const app = $("app");
+let chats = [], selected = null, active = 0, sending = false, hideTimer = null;
 
 const api = () => window.pywebview.api;
-const fit = () => api().resize(Math.ceil(document.getElementById("app").getBoundingClientRect().height));
+const WIN = document.documentElement.classList.contains("win");
+// offsetHeight ignores the open/close scale transform; add the transparent margin on both sides of the panel
+const fit = () => api().resize(app.offsetHeight + 2 * parseFloat(getComputedStyle(app).marginTop));
+
+// play the fade-out, then actually hide the window (on Windows, Python fades the whole window instead)
+function closeBox() {
+  if (hideTimer) return;
+  app.classList.remove("shown");
+  hideTimer = setTimeout(() => { hideTimer = null; api().hide(); }, WIN ? 0 : 120);
+}
+
+function setFocused() {
+  const focused = document.hasFocus();
+  document.body.classList.toggle("focused", focused);
+  if (WIN) api().set_active(focused);  // Windows draws the highlight as the window border
+}
+window.addEventListener("focus", setFocused);
+document.addEventListener("focusin", setFocused);
 
 function grow() {
   msg.style.height = "46px";
@@ -136,7 +182,7 @@ async function send() {
   }
   msg.value = "";
   grow();
-  api().hide();
+  closeBox();
 }
 
 msg.addEventListener("input", grow);
@@ -154,11 +200,21 @@ filter.addEventListener("keydown", e => {
   else if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); e.stopPropagation(); closeMenu(); }
 });
 // Esc anywhere in the box closes it (the dropdown's filter handles its own Esc first)
-document.addEventListener("keydown", e => { if (e.key === "Escape") api().hide(); });
-window.addEventListener("blur", () => { if (!sending) api().hide(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeBox(); });
+// bringing the window forward can blur it for a moment, so only close if focus is really gone
+window.addEventListener("blur", () => {
+  setFocused();
+  setTimeout(() => { if (!document.hasFocus() && !sending) closeBox(); }, 150);
+});
 
 // called from Python every time the box opens; notice is an optional message to show (e.g. missing permissions)
 async function onShow(notice) {
+  clearTimeout(hideTimer);  // reopened mid fade-out: don't let the old timer hide the new box
+  hideTimer = null;
+  app.classList.remove("shown");
+  void app.offsetWidth;  // restart the pop-in from its starting pose
+  app.classList.add("shown");
+  setFocused();
   if (!menu.hidden) closeMenu();
   showError(notice);
   msg.focus();

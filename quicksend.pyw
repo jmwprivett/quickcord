@@ -12,6 +12,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from ctypes import wintypes
 
 import pystray
 import webview
@@ -22,7 +23,10 @@ MAC = sys.platform == "darwin"
 HERE = os.path.dirname(os.path.abspath(__file__))
 API = "https://discord.com/api/v9"
 TAP_WINDOW = 0.4  # seconds allowed between the two Alt taps
-WIDTH, HEIGHT, MAX_HEIGHT = 680, 70, 480
+# on macOS the window is transparent and ui.html keeps a 16px margin around its panel for the shadow;
+# on Windows the panel fills the window and the OS draws the glass, corners and shadow
+MARGIN = 16 if MAC else 0
+WIDTH, HEIGHT, MAX_HEIGHT = 680 + 2 * MARGIN, 70 + 2 * MARGIN, 480 + 2 * MARGIN
 ALTS = {keyboard.Key.alt, keyboard.Key.alt_l, keyboard.Key.alt_r, keyboard.Key.alt_gr}
 TRAY = "click the menu bar icon" if MAC else "right-click the tray icon"
 
@@ -186,7 +190,16 @@ class Api:
     def resize(self, height):
         self._window.resize(WIDTH, max(HEIGHT, min(int(height), MAX_HEIGHT)))
 
+    def set_active(self, active):
+        """Blurple window border while the box has focus (Windows; ui.html draws it on macOS)."""
+        hwnd = None if MAC else user32.FindWindowW(None, "quickcord")
+        if hwnd:
+            color = ctypes.c_uint(0x00F26558 if active else 0xFFFFFFFF)  # #5865F2 as 0x00BBGGRR, or system default
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(color), 4)  # DWMWA_BORDER_COLOR
+
     def hide(self):
+        if not MAC:
+            fade(self._window, 1, 0)  # on macOS ui.html already faded the panel out
         self._window.hide()
 
 
@@ -236,7 +249,53 @@ def force_foreground(hwnd):
     user32.keybd_event(0x12, 0, 1, 0)  # VK_MENU down, extended
     user32.ShowWindow(hwnd, 5)  # SW_SHOW
     user32.SetForegroundWindow(hwnd)
+    # a lone Alt release puts the window in menu mode, which blurs the page and closes the box;
+    # an unassigned key in between (AutoHotkey's "menu mask" trick) makes it an Alt+key combo instead
+    user32.keybd_event(0xE8, 0, 0, 0)
+    user32.keybd_event(0xE8, 0, 2, 0)
     user32.keybd_event(0x12, 0, 3, 0)  # VK_MENU up
+
+
+def on_ui_thread(window, fn):
+    from System import Action  # pythonnet, which pywebview uses on Windows
+    window.native.Invoke(Action(fn))
+
+
+def glass(window, hwnd):
+    """Windows 11 acrylic behind the page, with rounded corners and the dark tint."""
+    from System.Drawing import Color
+    on_ui_thread(window, lambda: setattr(window.native.browser.webview, "DefaultBackgroundColor", Color.Transparent))
+
+    class Margins(ctypes.Structure):
+        _fields_ = [(side, ctypes.c_int) for side in ("left", "right", "top", "bottom")]
+
+    dwm = ctypes.windll.dwmapi
+    dwm.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(Margins(-1, -1, -1, -1)))  # glass under the whole window
+    for attr, value in ((20, 1), (33, 2), (38, 3)):  # dark mode, round corners, acrylic backdrop
+        v = ctypes.c_int(value)
+        dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(v), 4)
+
+
+def fade(window, start, end, steps=8):
+    """Fades the whole window (glass included) on Windows; about 150ms."""
+    for i in range(1, steps + 1):
+        on_ui_thread(window, lambda o=start + (end - start) * i / steps: setattr(window.native, "Opacity", o))
+        time.sleep(0.018)
+
+
+def hovered_unfocused(window):
+    """The box is open with the mouse over it, but another app has the keyboard."""
+    if MAC:
+        w = window.native  # NSWindow
+        return bool(w and w.isVisible() and not AppKit.NSApplication.sharedApplication().isActive()
+                    and AppKit.NSPointInRect(AppKit.NSEvent.mouseLocation(), w.frame()))
+    hwnd = user32.FindWindowW(None, "quickcord")
+    if not hwnd or not user32.IsWindowVisible(hwnd) or user32.GetForegroundWindow() == hwnd:
+        return False
+    pt, rect = wintypes.POINT(), wintypes.RECT()
+    user32.GetCursorPos(ctypes.byref(pt))
+    user32.GetWindowRect(hwnd, ctypes.byref(rect))
+    return rect.left <= pt.x < rect.right and rect.top <= pt.y < rect.bottom
 
 
 def activate_mac():
@@ -260,14 +319,18 @@ def main():
     api = Api()
     # inline html, not a file path: a path makes pywebview serve this whole folder on localhost
     with open(os.path.join(HERE, "ui.html"), encoding="utf-8") as f:
-        html = f.read()
-    window = webview.create_window("quickcord", html=html, js_api=api, width=WIDTH, height=HEIGHT,
-                                   frameless=True, on_top=True, hidden=True, background_color="#313338")
+        html = f.read().replace("<html>", f'<html class="{"mac" if MAC else "win"}">', 1)
+    # macOS: transparent window, ui.html draws and animates the panel itself.
+    # Windows: not pywebview's transparent mode (it force-shows the window on load); glass() makes it see-through
+    window = webview.create_window("quickcord", html=html, js_api=api, width=WIDTH, height=HEIGHT, min_size=(200, 40),
+                                   frameless=True, on_top=True, hidden=True, transparent=MAC, background_color="#000000")
     api._window = window
     notice = []  # set when the hotkey can't work, shown every time the box opens
 
     def show():
         screen = webview.screens[0]
+        if not MAC:
+            on_ui_thread(window, lambda: setattr(window.native, "Opacity", 0.0))
         window.resize(WIDTH, HEIGHT)
         window.move((screen.width - WIDTH) // 2, screen.height // 4)
         window.show()
@@ -276,10 +339,14 @@ def main():
         else:
             hwnd = user32.FindWindowW(None, "quickcord")
             if hwnd:
-                corner = ctypes.c_int(2)  # DWMWCP_ROUND, Windows 11 rounded corners
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner), 4)
-                force_foreground(hwnd)
+                glass(window, hwnd)
+                if user32.GetForegroundWindow() != hwnd:
+                    force_foreground(hwnd)
+                # pywebview only focuses the page on the very first show; typing needs it every time
+                on_ui_thread(window, lambda: window.native.browser.webview.Focus())
         window.evaluate_js(f"onShow({json.dumps(notice[0] if notice else None)})")
+        if not MAC:
+            fade(window, 0, 1)
 
     def show_soon():
         # off the calling thread: on macOS menu callbacks run on the main thread, where evaluate_js would deadlock
@@ -314,13 +381,36 @@ def main():
     def started():
         detector = DoubleTap()
 
+        def close_soon():  # off the key hook's thread: blocking there would stall every keypress
+            threading.Thread(target=lambda: window.evaluate_js("closeBox()"), daemon=True).start()
+
         def on(pressed):
             def handler(k):  # must return None: pynput stops the listener if a callback returns False
                 if detector.feed(pressed, k in ALTS, time.monotonic()):
                     show_soon()
+                # Esc while just hovering the box (it isn't focused, so the page never sees the key)
+                if MAC and pressed and k == keyboard.Key.esc and hovered_unfocused(window):
+                    close_soon()
             return handler
 
-        listener = keyboard.Listener(on_press=on(True), on_release=on(False), daemon=True)
+        swallowed = []  # an Esc press we swallowed, so its release gets swallowed too
+
+        def win32_filter(msg, data):
+            # Windows: same hover Esc, but swallowed so it doesn't also hit the app underneath
+            if data.vkCode != 0x1B:  # VK_ESCAPE
+                return True
+            if msg in (0x100, 0x104):  # WM_KEYDOWN, WM_SYSKEYDOWN
+                if hovered_unfocused(window):
+                    swallowed.append(True)
+                    close_soon()
+                    listener.suppress_event()
+            elif swallowed:
+                swallowed.clear()
+                listener.suppress_event()
+            return True
+
+        listener = keyboard.Listener(on_press=on(True), on_release=on(False), daemon=True,
+                                     win32_event_filter=win32_filter)
         listener.start()
 
         if MAC and keyboard_blocked(listener):

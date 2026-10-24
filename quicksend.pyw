@@ -283,14 +283,21 @@ def fade(window, start, end, steps=8):
         time.sleep(0.018)
 
 
+def is_open(window):
+    if MAC:
+        return bool(window.native and window.native.isVisible())
+    hwnd = user32.FindWindowW(None, "quickcord")
+    return bool(hwnd and user32.IsWindowVisible(hwnd))
+
+
 def hovered_unfocused(window):
     """The box is open with the mouse over it, but another app has the keyboard."""
     if MAC:
         w = window.native  # NSWindow
-        return bool(w and w.isVisible() and not AppKit.NSApplication.sharedApplication().isActive()
+        return bool(is_open(window) and not AppKit.NSApplication.sharedApplication().isActive()
                     and AppKit.NSPointInRect(AppKit.NSEvent.mouseLocation(), w.frame()))
     hwnd = user32.FindWindowW(None, "quickcord")
-    if not hwnd or not user32.IsWindowVisible(hwnd) or user32.GetForegroundWindow() == hwnd:
+    if not is_open(window) or user32.GetForegroundWindow() == hwnd:
         return False
     pt, rect = wintypes.POINT(), wintypes.RECT()
     user32.GetCursorPos(ctypes.byref(pt))
@@ -328,6 +335,8 @@ def main():
     notice = []  # set when the hotkey can't work, shown every time the box opens
 
     def show():
+        if is_open(window):  # hotkey again while it's up: leave it (and what you've typed) alone
+            return
         screen = webview.screens[0]
         if not MAC:
             on_ui_thread(window, lambda: setattr(window.native, "Opacity", 0.0))
